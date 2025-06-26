@@ -233,7 +233,6 @@ void UModifierMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 	if (bStupid && CharacterOwner && CharacterOwner->HasAuthority())
 	{
 		WantsModifiers = { EModifierByte::MOD_Level1, EModifierByte::MOD_Level5, EModifierByte::MOD_Level7 };
-		bStupid = false;
 	}
 	
 	UpdateModifierMovementState();
