@@ -7,6 +7,33 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModifierMovement)
 
+void FModifierMoveResponseDataContainer::ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement,
+	const FClientAdjustment& PendingAdjustment)
+{
+	Super::ServerFillResponseData(CharacterMovement, PendingAdjustment);
+
+	// Server ➜ Client
+	const UModifierMovement* MoveComp = Cast<UModifierMovement>(&CharacterMovement);
+	Modifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->Modifiers);  // AUTH
+}
+
+bool FModifierMoveResponseDataContainer::Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar,
+	UPackageMap* PackageMap)
+{
+	if (!Super::Serialize(CharacterMovement, Ar, PackageMap))
+	{
+		return false;
+	}
+
+	// Server ➜ Client
+	if (IsCorrection())
+	{
+		Ar << Modifiers;  // AUTH
+	}
+
+	return !Ar.IsError();
+}
+
 void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove,
 	ENetworkMoveType MoveType)
 {
@@ -22,6 +49,7 @@ void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Charac
 	
 	const FSavedMove_Character_Modifier& SavedMove = static_cast<const FSavedMove_Character_Modifier&>(ClientMove);
 	WantsModifiers = SavedMove.WantsModifiers;
+	Modifiers = SavedMove.Modifiers;  // AUTH
 }
 
 bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar,
@@ -36,6 +64,7 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 	// }
 
 	Ar << WantsModifiers;
+	Ar << Modifiers;  // AUTH
 	
 	// // Serialize the number of elements
 	// uint8 NumModifiers = WantsModifiers.Num();
@@ -70,6 +99,7 @@ UModifierMovement::UModifierMovement(const FObjectInitializer& ObjectInitializer
 	: Super(ObjectInitializer)
 {
 	SetNetworkMoveDataContainer(ModifierMoveDataContainer);
+	SetMoveResponseDataContainer(ModifierMoveResponseDataContainer);
 	
 	MaxAccelerationModified = 250.f;
 	MaxWalkSpeedModified = 250.f;
@@ -121,7 +151,7 @@ void UModifierMovement::ApplyVelocityBraking(float DeltaTime, float Friction, fl
 	Super::ApplyVelocityBraking(DeltaTime, Friction, BrakingDeceleration);
 }
 
-void UModifierMovement::ChangeModifiers(const TArray<uint8>& NewModifiers, bool bClientSimulation, uint8 PrevSimulatedLevel)
+void UModifierMovement::ChangeModifiers(const TArray<EModifierByte>& NewModifiers, bool bClientSimulation, uint8 PrevSimulatedLevel)
 {
 	if (!HasValidData())
 	{
@@ -130,7 +160,7 @@ void UModifierMovement::ChangeModifiers(const TArray<uint8>& NewModifiers, bool 
 
 	if (!bClientSimulation)
 	{
-		const TArray<uint8> PrevModifiers = Modifiers;
+		const TArray<EModifierByte> PrevModifiers = Modifiers;
 		if (PrevModifiers != NewModifiers)
 		{
 			const uint8 PrevLevel = GetModifierLevel();
@@ -149,7 +179,7 @@ void UModifierMovement::ChangeModifiers(const TArray<uint8>& NewModifiers, bool 
 	}
 }
 
-TArray<uint8> UModifierMovement::GetModifiersForCurrentState() const
+TArray<EModifierByte> UModifierMovement::GetModifiersForCurrentState() const
 {
 	if (!UpdatedComponent || UpdatedComponent->IsSimulatingPhysics())
 	{
@@ -190,7 +220,7 @@ void UModifierMovement::UpdateModifierMovementState()
 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
 	{
 		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
-		const TArray<uint8>& NewModifiers = GetModifiersForCurrentState();
+		const TArray<EModifierByte>& NewModifiers = GetModifiersForCurrentState();
 		if (NewModifiers != Modifiers)
 		{
 			ChangeModifiers(NewModifiers);
@@ -200,6 +230,12 @@ void UModifierMovement::UpdateModifierMovementState()
 
 void UModifierMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 {
+	if (bStupid && CharacterOwner && CharacterOwner->HasAuthority())
+	{
+		WantsModifiers = { EModifierByte::MOD_Level1, EModifierByte::MOD_Level5, EModifierByte::MOD_Level7 };
+		bStupid = false;
+	}
+	
 	UpdateModifierMovementState();
 
 	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
@@ -222,14 +258,59 @@ void UModifierMovement::ServerMove_PerformMovement(const FCharacterNetworkMoveDa
 	
 	const FModifierNetworkMoveData& ModifierMoveData = static_cast<const FModifierNetworkMoveData&>(MoveData);
 
-	WantsModifiers = SetModifiersFromBitmask(ModifierMoveData.WantsModifiers);
+	WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(ModifierMoveData.WantsModifiers);
 
 	Super::ServerMove_PerformMovement(MoveData);
 }
 
+bool UModifierMovement::ServerCheckClientError(float ClientTimeStamp, float DeltaTime, const FVector& Accel,
+	const FVector& ClientWorldLocation, const FVector& RelativeClientLocation, UPrimitiveComponent* ClientMovementBase,
+	FName ClientBaseBoneName, uint8 ClientMovementMode)
+{
+	// ServerMovePacked_ServerReceive ➜ ServerMove_HandleMoveData ➜ ServerMove_PerformMovement
+	// ➜ ServerMoveHandleClientError ➜ ServerCheckClientError
+	
+	if (Super::ServerCheckClientError(ClientTimeStamp, DeltaTime, Accel, ClientWorldLocation, RelativeClientLocation, ClientMovementBase, ClientBaseBoneName, ClientMovementMode))
+	{
+		return true;
+	}
+    
+	/*
+	 * This will trigger a client correction if the value in the Client differs
+	 */
+	const FModifierNetworkMoveData* CurrentMoveData = static_cast<const FModifierNetworkMoveData*>(GetCurrentNetworkMoveData());
+	if (FModifierCompression::GetBitmaskFromModifiers(Modifiers) != CurrentMoveData->Modifiers)
+	{
+		return true;  // AUTH
+	}
+
+	return false;
+}
+
+void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData,
+	float TimeStamp, FVector NewLocation, FVector NewVelocity, UPrimitiveComponent* NewBase, FName NewBaseBoneName,
+	bool bHasBase, bool bBaseRelativePosition, uint8 ServerMovementMode
+#if UE_5_03_OR_LATER
+	, FVector ServerGravityDirection
+#endif
+	)
+{
+	// This occurs on AutonomousProxy, when the server sends the move response
+	// This is where we receive the snare, and can override the server's location, assuming it has given us authority
+
+	// Server >> SendClientAdjustment() ➜ ServerSendMoveResponse() ➜ ServerFillResponseData() + MoveResponsePacked_ServerSend() >> Client
+	// >> ClientMoveResponsePacked() ➜ ClientHandleMoveResponse() ➜ ClientAdjustPosition_Implementation() ➜ OnClientCorrectionReceived()
+	
+	const FModifierMoveResponseDataContainer& MoveResponse = static_cast<const FModifierMoveResponseDataContainer&>(GetMoveResponseDataContainer());
+	WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(MoveResponse.Modifiers);  // AUTH
+	
+	Super::OnClientCorrectionReceived(ClientData, TimeStamp, NewLocation, NewVelocity, NewBase, NewBaseBoneName,
+		bHasBase, bBaseRelativePosition, ServerMovementMode, ServerGravityDirection);
+}
+
 bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 {
-	const TArray<uint8> RealWantsModifiers = WantsModifiers;
+	const TArray<EModifierByte> RealWantsModifiers = WantsModifiers;
 	
 	const bool bResult = Super::ClientUpdatePositionAfterServerUpdate();
 	
@@ -243,6 +324,7 @@ void FSavedMove_Character_Modifier::Clear()
 	Super::Clear();
 
 	WantsModifiers = 0;
+	Modifiers = 0;  // AUTH
 }
 
 void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel,
@@ -253,7 +335,7 @@ void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime,
 	if (const UModifierMovement* MoveComp = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement())
 	{
 		// Bit pack the modifiers into a bitfield.
-		WantsModifiers = GetBitmaskFromModifiers(MoveComp->WantsModifiers);
+		WantsModifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->WantsModifiers);
 	}
 }
 
@@ -297,7 +379,7 @@ void FSavedMove_Character_Modifier::SetInitialPosition(ACharacter* C)
 	// Retrieve the value from our CMC to revert the saved move value back to this.
 	if (const UModifierMovement* MoveComp = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement())
 	{
-		WantsModifiers = GetBitmaskFromModifiers(MoveComp->WantsModifiers);
+		WantsModifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->WantsModifiers);
 	}
 }
 
@@ -310,8 +392,19 @@ void FSavedMove_Character_Modifier::CombineWith(const FSavedMove_Character* OldM
 
 	if (UModifierMovement* MoveComp = C ? Cast<UModifierMovement>(C->GetCharacterMovement()) : nullptr)
 	{
-		MoveComp->WantsModifiers = MoveComp->SetModifiersFromBitmask(SavedOldMove->WantsModifiers);
+		MoveComp->WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(SavedOldMove->WantsModifiers);
 	}
+}
+
+void FSavedMove_Character_Modifier::PostUpdate(ACharacter* C, EPostUpdateMode PostUpdateMode)
+{
+	// When considering whether to delay or combine moves, we need to compare the move at the start and the end
+	if (const UModifierMovement* MoveComp = C ? Cast<UModifierMovement>(C->GetCharacterMovement()) : nullptr)
+	{
+		Modifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->Modifiers);  // AUTH
+	}
+
+	Super::PostUpdate(C, PostUpdateMode);
 }
 
 bool FSavedMove_Character_Modifier::IsImportantMove(const FSavedMovePtr& LastAckedMove) const

@@ -4,9 +4,22 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Modifier/ModifierCompression.h"
+#include "System/PredictedMovementVersioning.h"
 #include "ModifierMovement.generated.h"
 
 class AModifierCharacter;
+
+
+struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMoveResponseDataContainer
+{  // Server ➜ Client
+	using Super = FCharacterMoveResponseDataContainer;
+
+	uint8 Modifiers;  // AUTH
+	
+	virtual void ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement, const FClientAdjustment& PendingAdjustment) override;
+	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap) override;
+};
 
 struct PREDICTEDMOVEMENT_API FModifierNetworkMoveData : FCharacterNetworkMoveData
 {  // Client ➜ Server
@@ -15,9 +28,11 @@ public:
  
 	FModifierNetworkMoveData()
 		: WantsModifiers(0)
+		, Modifiers(0)
 	{}
 
 	uint8 WantsModifiers;
+	uint8 Modifiers;  // AUTH
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -63,39 +78,27 @@ public:
 
 public:
 	/**
+	 * @TODO use a templated class
 	 * The requested input state, which requests modifiers of the specified level
 	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
 	 */
-	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
-	TArray<uint8> WantsModifiers;
+	UPROPERTY()
+	TArray<EModifierByte> WantsModifiers;
 
 	/**
 	 * The actual state, which represents the actual modifiers applied to the character
 	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
 	 */
-	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
-	TArray<uint8> Modifiers;
+	UPROPERTY()
+	TArray<EModifierByte> Modifiers;
 
-	template <typename T>
-	static TArray<T> SetModifiersFromBitmask(T ModifierFlags)
+	UPROPERTY()
+	bool bStupid = false;
+	
+	UFUNCTION(BlueprintCallable, Category="Character Movement (Modifier)")
+	void DoSomethingStupid()
 	{
-		static_assert(std::is_unsigned_v<T>, "SetModifierFromBitmask only supports unsigned integer types.");
-		static_assert(sizeof(T) <= sizeof(uint64), "SetModifierFromBitmask supports up to uint64.");
-
-		TArray<T> Result;
-
-		const uint64 MaxBits = sizeof(T) * 8;
-
-		for (uint64 BitIndex = 0; BitIndex < MaxBits; ++BitIndex)
-		{
-			T Flag = static_cast<T>(1ULL << BitIndex);
-			if ((ModifierFlags & Flag) != 0)
-			{
-				Result.Add(Flag);
-			}
-		}
-
-		return Result;
+		bStupid = true;
 	}
 
 public:
@@ -124,16 +127,40 @@ public:
 		// @TODO sim proxy
 		return Modifiers.Num();
 	}
+
+	template<typename T>
+	void AddWantedModifier(T InLevel)
+	{
+		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return; }
+		
+		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
+		if (!WantsModifiers.Contains(Level))
+		{
+			WantsModifiers.Add(Level);
+		}
+	}
+
+	template<typename T>
+	void RemoveWantedModifier(T InLevel)
+	{
+		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return; }
+		
+		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
+		if (WantsModifiers.Contains(Level))
+		{
+			WantsModifiers.Remove(Level);
+		}
+	}
 	
 	/**
 	 * Call CharacterOwner->OnStartModifier() if successful.
 	 * In general you should set WantsModifierLevel instead to have the Modifier persist during movement, or just use the Modifier functions on the owning Character.
 	 * @param	bClientSimulation	true when called when bIsModifiered is replicated to non owned clients.
 	 */
-	virtual void ChangeModifiers(const TArray<uint8>& NewModifiers, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
+	virtual void ChangeModifiers(const TArray<EModifierByte>& NewModifiers, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
 
 	/** Returns true if the character is allowed to Modifier in the current state. */
-	virtual TArray<uint8> GetModifiersForCurrentState() const;
+	virtual TArray<EModifierByte> GetModifiersForCurrentState() const;
 	
 	/** Returns true if the character is allowed to Modifier in the current state. */
 	virtual uint8 GetModifierLevelForCurrentState() const;
@@ -141,14 +168,29 @@ public:
 
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
 	virtual void UpdateCharacterStateAfterMovement(float DeltaSeconds) override;
-
+	
+public:
 	virtual void ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData) override;
+	
+	virtual bool ServerCheckClientError(float ClientTimeStamp, float DeltaTime, const FVector& Accel,
+		const FVector& ClientWorldLocation, const FVector& RelativeClientLocation,
+		UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode) override;
+	
+	virtual void OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData, float TimeStamp,
+		FVector NewLocation, FVector NewVelocity, UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase,
+		bool bBaseRelativePosition, uint8 ServerMovementMode
+#if UE_5_03_OR_LATER
+		, FVector ServerGravityDirection) override;
+#else
+	) override;
+#endif
 
 protected:
 	virtual bool ClientUpdatePositionAfterServerUpdate() override;
 
 private:
 	FModifierNetworkMoveDataContainer ModifierMoveDataContainer;
+	FModifierMoveResponseDataContainer ModifierMoveResponseDataContainer;
 	
 public:
 	/** Get prediction data for a client game. Should not be used if not running as a client. Allocates the data on demand and can be overridden to allocate a custom override if desired. Result must be a FNetworkPredictionData_Client_Character. */
@@ -162,12 +204,14 @@ class PREDICTEDMOVEMENT_API FSavedMove_Character_Modifier : public FSavedMove_Ch
 public:
 	FSavedMove_Character_Modifier()
 		: WantsModifiers(0)
+		, Modifiers(0)
 	{}
 
 	virtual ~FSavedMove_Character_Modifier() override
 	{}
 
 	uint8 WantsModifiers;
+	uint8 Modifiers;  // AUTH
 		
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;
@@ -183,24 +227,12 @@ public:
 
 	/** Combine this move with an older move and update relevant state. */
 	virtual void CombineWith(const FSavedMove_Character* OldMove, ACharacter* InCharacter, APlayerController* PC, const FVector& OldStartLocation) override;
-
-	virtual bool IsImportantMove(const FSavedMovePtr& LastAckedMove) const override;
 	
-	template <typename T>
-	static T GetBitmaskFromModifiers(const TArray<T>& Modifiers)
-	{
-		static_assert(std::is_unsigned_v<T>, "GetBitmaskFromModifiers only supports unsigned integer types.");
-		static_assert(sizeof(T) <= sizeof(uint64), "GetBitmaskFromModifiers supports up to uint64.");
+	/** Set the properties describing the final position, etc. of the moved pawn. */
+	virtual void PostUpdate(ACharacter* C, EPostUpdateMode PostUpdateMode) override;
 
-		T Bitmask = 0;
-
-		for (const T Modifier : Modifiers)
-		{
-			Bitmask |= Modifier;
-		}
-
-		return Bitmask;
-	}
+	/** Returns true if this move is an "important" move that should be sent again if not acked by the server */
+	virtual bool IsImportantMove(const FSavedMovePtr& LastAckedMove) const override;
 };
 
 class PREDICTEDMOVEMENT_API FNetworkPredictionData_Client_Character_Modifier : public FNetworkPredictionData_Client_Character
