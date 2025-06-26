@@ -18,23 +18,23 @@ void AModifierCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME_CONDITION(ThisClass, ModifierLevel, COND_SimulatedOnly);
+	DOREPLIFETIME_CONDITION(ThisClass, SimulatedModifierLevel, COND_SimulatedOnly);
 }
 
-void AModifierCharacter::OnRep_ModifierLevel(uint8 PrevLevel)
+void AModifierCharacter::OnRep_SimulatedModifierLevel(uint8 PrevLevel)
 {
 	if (ModifierMovement)
 	{
-		if (ModifierLevel != PrevLevel)
-		{
-			ModifierMovement->WantsModifierLevel = ModifierLevel;
-			ModifierMovement->ChangeModifier(ModifierLevel, true, PrevLevel);
-			ModifierMovement->bNetworkUpdateReceived = true;
-		}
+		// @TODO if (SimulatedModifierLevel != PrevLevel)
+		// {
+		// 	ModifierMovement->WantsModifierLevel = ModifierLevel;
+		// 	ModifierMovement->ChangeModifier(ModifierLevel, true, PrevLevel);
+		// 	ModifierMovement->bNetworkUpdateReceived = true;
+		// }
 	}
 }
 
-void AModifierCharacter::Modifier(bool bClientSimulation)
+void AModifierCharacter::AddModifier(bool bClientSimulation)
 {
 	if (ModifierMovement)
 	{
@@ -42,7 +42,7 @@ void AModifierCharacter::Modifier(bool bClientSimulation)
 	}
 }
 
-void AModifierCharacter::UnModifier(bool bClientSimulation)
+void AModifierCharacter::RemoveModifier(bool bClientSimulation)
 {
 	if (ModifierMovement)
 	{

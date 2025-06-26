@@ -66,6 +66,9 @@ public:
 	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
 	uint8 WantsModifierLevel;
 
+	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
+	uint8 ModifierLevel;
+
 public:
 	UModifierMovement(const FObjectInitializer& ObjectInitializer);
 
@@ -82,8 +85,6 @@ public:
 	virtual void ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration) override;
 
 public:
-	virtual uint8 GetModifierLevel() const;
-
 	/**
 	 * Call CharacterOwner->OnStartModifier() if successful.
 	 * In general you should set WantsModifierLevel instead to have the Modifier persist during movement, or just use the Modifier functions on the owning Character.

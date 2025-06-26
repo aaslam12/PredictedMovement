@@ -66,45 +66,29 @@ void UModifierMovement::SetUpdatedComponent(USceneComponent* NewUpdatedComponent
 
 float UModifierMovement::GetMaxAcceleration() const
 {
-	const uint8 ModifierLevel = GetModifierLevel();
 	const float Modified = MaxAccelerationModified * ModifierLevel;
 	return Super::GetMaxAcceleration() + Modified;
 }
 
 float UModifierMovement::GetMaxSpeed() const
 {
-	const uint8 ModifierLevel = GetModifierLevel();
 	const float Modified = MaxWalkSpeedModified * ModifierLevel;
 	return Super::GetMaxSpeed() + Modified;
 }
 
 float UModifierMovement::GetMaxBrakingDeceleration() const
 {
-	if (GetModifierLevel())
-	{
-	}
 	return Super::GetMaxBrakingDeceleration();
 }
 
 void UModifierMovement::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)
 {
-	if (GetModifierLevel() && IsMovingOnGround())
-	{
-	}
 	Super::CalcVelocity(DeltaTime, Friction, bFluid, BrakingDeceleration);
 }
 
 void UModifierMovement::ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration)
 {
-	if (GetModifierLevel() && IsMovingOnGround())
-	{
-	}
 	Super::ApplyVelocityBraking(DeltaTime, Friction, BrakingDeceleration);
-}
-
-uint8 UModifierMovement::GetModifierLevel() const
-{
-	return ModifierCharacterOwner ? ModifierCharacterOwner->ModifierLevel : 0;
 }
 
 void UModifierMovement::ChangeModifier(uint8 NewLevel, bool bClientSimulation, uint8 PrevSimulatedLevel)
@@ -116,10 +100,14 @@ void UModifierMovement::ChangeModifier(uint8 NewLevel, bool bClientSimulation, u
 
 	if (!bClientSimulation)
 	{
-		const uint8 PrevLevel = GetModifierLevel();
+		const uint8 PrevLevel = ModifierLevel;
 		if (PrevLevel != NewLevel)
 		{
-			ModifierCharacterOwner->ModifierLevel = NewLevel;
+			ModifierLevel = NewLevel;
+			if (ModifierCharacterOwner->HasAuthority())
+			{
+				ModifierCharacterOwner->SimulatedModifierLevel = ModifierLevel;
+			}
 			// @TODO ModifierCharacterOwner->OnModifierChanged(ModifierType, ModifierLevel, PrevLevel);
 		}
 	}
@@ -141,11 +129,6 @@ uint8 UModifierMovement::GetModifierLevelForCurrentState() const
 		return 0;
 	}
 
-	if (ModifierCharacterOwner->ModifierLevelOverrideDebug != UINT8_MAX)
-	{
-		return ModifierCharacterOwner->ModifierLevelOverrideDebug;
-	}
-
 	return WantsModifierLevel;
 }
 
@@ -161,7 +144,7 @@ void UModifierMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 	{
 		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
 		const uint8 NewModifierLevel = GetModifierLevelForCurrentState();
-		if (NewModifierLevel != GetModifierLevel())
+		if (NewModifierLevel != ModifierLevel)
 		{
 			ChangeModifier(NewModifierLevel);
 		}
@@ -177,7 +160,7 @@ void UModifierMovement::UpdateCharacterStateAfterMovement(float DeltaSeconds)
 	{
 		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
 		const uint8 NewModifierLevel = GetModifierLevelForCurrentState();
-		if (NewModifierLevel != GetModifierLevel())
+		if (NewModifierLevel != ModifierLevel)
 		{
 			ChangeModifier(NewModifierLevel);
 		}

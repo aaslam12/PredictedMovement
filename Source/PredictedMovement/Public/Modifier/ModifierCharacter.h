@@ -23,18 +23,9 @@ protected:
 	
 public:
 	/** Set by character movement to specify that this Character is currently Modified. */
-	UPROPERTY(BlueprintReadOnly, replicatedUsing=OnRep_ModifierLevel, Category=Character)
-	uint8 ModifierLevel;
+	UPROPERTY(BlueprintReadOnly, replicatedUsing=OnRep_SimulatedModifierLevel, Category=Character)
+	uint8 SimulatedModifierLevel;
 
-	UPROPERTY(BlueprintReadOnly, Category=Character)
-	uint8 ModifierLevelOverrideDebug = UINT8_MAX;	
-
-	UFUNCTION(BlueprintCallable, Category=Character)
-	void OverrideModifierLevel(uint8 Level)
-	{
-		ModifierLevelOverrideDebug = Level;
-	}
-	
 public:
 	AModifierCharacter(const FObjectInitializer& FObjectInitializer);
 
@@ -43,7 +34,7 @@ public:
 public:
 	/** Handle Crouching replicated from server */
 	UFUNCTION()
-	virtual void OnRep_ModifierLevel(uint8 PrevLevel);
+	virtual void OnRep_SimulatedModifierLevel(uint8 PrevLevel);
 
 	/**
 	 * Request the character to start Modified. The request is processed on the next update of the CharacterMovementComponent.
@@ -52,7 +43,7 @@ public:
 	 * @see CharacterMovement->WantsToModifier
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation"))
-	virtual void Modifier(bool bClientSimulation = false);
+	virtual void AddModifier(bool bClientSimulation = false);
 
 	/**
 	 * Request the character to stop Modified. The request is processed on the next update of the CharacterMovementComponent.
@@ -61,7 +52,7 @@ public:
 	 * @see CharacterMovement->WantsToModifier
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation"))
-	virtual void UnModifier(bool bClientSimulation = false);
+	virtual void RemoveModifier(bool bClientSimulation = false);
 
 	/** Called when Character stops Modified. Called on non-owned Characters through bIsModified replication. */
 	virtual void OnEndModifier();
