@@ -14,9 +14,10 @@ public:
 	typedef FCharacterNetworkMoveData Super;
  
 	FModifierNetworkMoveData()
+		: WantsModifiers(0)
 	{}
 
-	TArray<uint8> WantsModifiers;
+	uint8 WantsModifiers;
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -61,12 +62,41 @@ public:
 	float MaxWalkSpeedModified;
 
 public:
-	/** If true, try to Modifier (or keep Modified) on next update. If false, try to stop Modified on next update. */
+	/**
+	 * The requested input state, which requests modifiers of the specified level
+	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
+	 */
 	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
 	TArray<uint8> WantsModifiers;
 
+	/**
+	 * The actual state, which represents the actual modifiers applied to the character
+	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
+	 */
 	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
 	TArray<uint8> Modifiers;
+
+	template <typename T>
+	static TArray<T> SetModifiersFromBitmask(T ModifierFlags)
+	{
+		static_assert(std::is_unsigned_v<T>, "SetModifierFromBitmask only supports unsigned integer types.");
+		static_assert(sizeof(T) <= sizeof(uint64), "SetModifierFromBitmask supports up to uint64.");
+
+		TArray<T> Result;
+
+		const uint64 MaxBits = sizeof(T) * 8;
+
+		for (uint64 BitIndex = 0; BitIndex < MaxBits; ++BitIndex)
+		{
+			T Flag = static_cast<T>(1ULL << BitIndex);
+			if ((ModifierFlags & Flag) != 0)
+			{
+				Result.Add(Flag);
+			}
+		}
+
+		return Result;
+	}
 
 public:
 	UModifierMovement(const FObjectInitializer& ObjectInitializer);
@@ -100,7 +130,7 @@ public:
 	 * In general you should set WantsModifierLevel instead to have the Modifier persist during movement, or just use the Modifier functions on the owning Character.
 	 * @param	bClientSimulation	true when called when bIsModifiered is replicated to non owned clients.
 	 */
-	virtual void ChangeModifiers(TArray<uint8> NewModifiers, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
+	virtual void ChangeModifiers(const TArray<uint8>& NewModifiers, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
 
 	/** Returns true if the character is allowed to Modifier in the current state. */
 	virtual TArray<uint8> GetModifiersForCurrentState() const;
@@ -131,13 +161,13 @@ class PREDICTEDMOVEMENT_API FSavedMove_Character_Modifier : public FSavedMove_Ch
 
 public:
 	FSavedMove_Character_Modifier()
-	{
-	}
+		: WantsModifiers(0)
+	{}
 
 	virtual ~FSavedMove_Character_Modifier() override
 	{}
 
-	TArray<uint8> WantsModifiers;
+	uint8 WantsModifiers;
 		
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;
@@ -155,6 +185,22 @@ public:
 	virtual void CombineWith(const FSavedMove_Character* OldMove, ACharacter* InCharacter, APlayerController* PC, const FVector& OldStartLocation) override;
 
 	virtual bool IsImportantMove(const FSavedMovePtr& LastAckedMove) const override;
+	
+	template <typename T>
+	static T GetBitmaskFromModifiers(const TArray<T>& Modifiers)
+	{
+		static_assert(std::is_unsigned_v<T>, "GetBitmaskFromModifiers only supports unsigned integer types.");
+		static_assert(sizeof(T) <= sizeof(uint64), "GetBitmaskFromModifiers supports up to uint64.");
+
+		T Bitmask = 0;
+
+		for (const T Modifier : Modifiers)
+		{
+			Bitmask |= Modifier;
+		}
+
+		return Bitmask;
+	}
 };
 
 class PREDICTEDMOVEMENT_API FNetworkPredictionData_Client_Character_Modifier : public FNetworkPredictionData_Client_Character

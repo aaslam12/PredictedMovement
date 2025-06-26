@@ -29,37 +29,39 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 {  // Client ➜ Server
 	Super::Serialize(CharacterMovement, Ar, PackageMap, MoveType);
 
-	constexpr uint8 MaxModifiers = 8;
+	// constexpr uint8 MaxModifiers = 8;
 	// if (MaxModifiers <= 1)
 	// {
 	// 	return !Ar.IsError();
 	// }
-	
-	// Serialize the number of elements
-	uint8 NumModifiers = WantsModifiers.Num();
-	if (Ar.IsSaving())
-	{
-		NumModifiers = FMath::Min(MaxModifiers, NumModifiers);
-	}
-	Ar << NumModifiers;
 
-	// Resize the array if needed
-	if (Ar.IsLoading())
-	{
-		const FName ModifierType = TEXT("DebugType");  // @TODO
-		if (!ensureMsgf(NumModifiers <= MaxModifiers,
-			TEXT("Deserializing modifier %s array with %d elements when max is %d -- Check packet serialization logic"), *ModifierType.ToString(), NumModifiers, MaxModifiers))
-		{
-			NumModifiers = MaxModifiers;
-		}
-		WantsModifiers.SetNum(NumModifiers);
-	}
+	Ar << WantsModifiers;
 	
-	// Serialize the elements
-	for (uint8 i = 0; i < NumModifiers; ++i)
-	{
-		Ar << WantsModifiers[i];
-	}
+	// // Serialize the number of elements
+	// uint8 NumModifiers = WantsModifiers.Num();
+	// if (Ar.IsSaving())
+	// {
+	// 	NumModifiers = FMath::Min(MaxModifiers, NumModifiers);
+	// }
+	// Ar << NumModifiers;
+	//
+	// // Resize the array if needed
+	// if (Ar.IsLoading())
+	// {
+	// 	const FName ModifierType = TEXT("DebugType");  // @TODO
+	// 	if (!ensureMsgf(NumModifiers <= MaxModifiers,
+	// 		TEXT("Deserializing modifier %s array with %d elements when max is %d -- Check packet serialization logic"), *ModifierType.ToString(), NumModifiers, MaxModifiers))
+	// 	{
+	// 		NumModifiers = MaxModifiers;
+	// 	}
+	// 	WantsModifiers.SetNum(NumModifiers);
+	// }
+	//
+	// // Serialize the elements
+	// for (uint8 i = 0; i < NumModifiers; ++i)
+	// {
+	// 	Ar << WantsModifiers[i];
+	// }
 
 	return !Ar.IsError();
 }
@@ -119,7 +121,7 @@ void UModifierMovement::ApplyVelocityBraking(float DeltaTime, float Friction, fl
 	Super::ApplyVelocityBraking(DeltaTime, Friction, BrakingDeceleration);
 }
 
-void UModifierMovement::ChangeModifiers(TArray<uint8> NewModifiers, bool bClientSimulation, uint8 PrevSimulatedLevel)
+void UModifierMovement::ChangeModifiers(const TArray<uint8>& NewModifiers, bool bClientSimulation, uint8 PrevSimulatedLevel)
 {
 	if (!HasValidData())
 	{
@@ -188,7 +190,7 @@ void UModifierMovement::UpdateModifierMovementState()
 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
 	{
 		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
-		const TArray<uint8> NewModifiers = GetModifiersForCurrentState();
+		const TArray<uint8>& NewModifiers = GetModifiersForCurrentState();
 		if (NewModifiers != Modifiers)
 		{
 			ChangeModifiers(NewModifiers);
@@ -220,16 +222,18 @@ void UModifierMovement::ServerMove_PerformMovement(const FCharacterNetworkMoveDa
 	
 	const FModifierNetworkMoveData& ModifierMoveData = static_cast<const FModifierNetworkMoveData&>(MoveData);
 
-	WantsModifiers = ModifierMoveData.WantsModifiers;
+	WantsModifiers = SetModifiersFromBitmask(ModifierMoveData.WantsModifiers);
 
 	Super::ServerMove_PerformMovement(MoveData);
 }
 
 bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 {
-	const TArray<uint8> RealWantsModifierLevel = WantsModifiers;
+	const TArray<uint8> RealWantsModifiers = WantsModifiers;
+	
 	const bool bResult = Super::ClientUpdatePositionAfterServerUpdate();
-	WantsModifiers = RealWantsModifierLevel;
+	
+	WantsModifiers = RealWantsModifiers;
 
 	return bResult;
 }
@@ -238,7 +242,7 @@ void FSavedMove_Character_Modifier::Clear()
 {
 	Super::Clear();
 
-	WantsModifiers = {};
+	WantsModifiers = 0;
 }
 
 void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel,
@@ -246,7 +250,11 @@ void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime,
 {
 	Super::SetMoveFor(C, InDeltaTime, NewAccel, ClientData);
 
-	WantsModifiers = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement()->WantsModifiers;
+	if (const UModifierMovement* MoveComp = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement())
+	{
+		// Bit pack the modifiers into a bitfield.
+		WantsModifiers = GetBitmaskFromModifiers(MoveComp->WantsModifiers);
+	}
 }
 
 bool FSavedMove_Character_Modifier::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter,
@@ -287,8 +295,10 @@ void FSavedMove_Character_Modifier::SetInitialPosition(ACharacter* C)
 	Super::SetInitialPosition(C);
 
 	// Retrieve the value from our CMC to revert the saved move value back to this.
-	
-	WantsModifiers = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement()->WantsModifiers;
+	if (const UModifierMovement* MoveComp = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement())
+	{
+		WantsModifiers = GetBitmaskFromModifiers(MoveComp->WantsModifiers);
+	}
 }
 
 void FSavedMove_Character_Modifier::CombineWith(const FSavedMove_Character* OldMove, ACharacter* C,
@@ -300,7 +310,7 @@ void FSavedMove_Character_Modifier::CombineWith(const FSavedMove_Character* OldM
 
 	if (UModifierMovement* MoveComp = C ? Cast<UModifierMovement>(C->GetCharacterMovement()) : nullptr)
 	{
-		MoveComp->WantsModifiers = SavedOldMove->WantsModifiers;
+		MoveComp->WantsModifiers = MoveComp->SetModifiersFromBitmask(SavedOldMove->WantsModifiers);
 	}
 }
 
