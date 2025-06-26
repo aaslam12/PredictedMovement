@@ -34,19 +34,25 @@ void AModifierCharacter::OnRep_SimulatedModifierLevel(uint8 PrevLevel)
 	}
 }
 
-void AModifierCharacter::AddModifier(bool bClientSimulation)
+void AModifierCharacter::AddModifier(uint8 Level, bool bClientSimulation)
 {
 	if (ModifierMovement)
 	{
-		ModifierMovement->WantsModifierLevel++;
+		if (!ModifierMovement->WantsModifiers.Contains(Level))
+		{
+			ModifierMovement->WantsModifiers.Add(Level);
+		}
 	}
 }
 
-void AModifierCharacter::RemoveModifier(bool bClientSimulation)
+void AModifierCharacter::RemoveModifier(uint8 Level, bool bClientSimulation)
 {
 	if (ModifierMovement)
 	{
-		ModifierMovement->WantsModifierLevel--;
+		if (ModifierMovement->WantsModifiers.Contains(Level))
+		{
+			ModifierMovement->WantsModifiers.Remove(Level);
+		}
 	}
 }
 

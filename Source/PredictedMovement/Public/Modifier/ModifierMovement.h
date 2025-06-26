@@ -14,10 +14,9 @@ public:
 	typedef FCharacterNetworkMoveData Super;
  
 	FModifierNetworkMoveData()
-		: WantsModifierLevel(false)
 	{}
 
-	uint8 WantsModifierLevel;
+	TArray<uint8> WantsModifiers;
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -46,7 +45,7 @@ UCLASS()
 class PREDICTEDMOVEMENT_API UModifierMovement : public UCharacterMovementComponent
 {
 	GENERATED_BODY()
-	
+
 private:
 	/** Character movement component belongs to */
 	UPROPERTY(Transient, DuplicateTransient)
@@ -64,10 +63,10 @@ public:
 public:
 	/** If true, try to Modifier (or keep Modified) on next update. If false, try to stop Modified on next update. */
 	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
-	uint8 WantsModifierLevel;
+	TArray<uint8> WantsModifiers;
 
 	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
-	uint8 ModifierLevel;
+	TArray<uint8> Modifiers;
 
 public:
 	UModifierMovement(const FObjectInitializer& ObjectInitializer);
@@ -85,13 +84,27 @@ public:
 	virtual void ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration) override;
 
 public:
+	uint8 GetWantedModifierLevel() const
+	{
+		return WantsModifiers.Num();
+	}
+	
+	uint8 GetModifierLevel() const
+	{
+		// @TODO sim proxy
+		return Modifiers.Num();
+	}
+	
 	/**
 	 * Call CharacterOwner->OnStartModifier() if successful.
 	 * In general you should set WantsModifierLevel instead to have the Modifier persist during movement, or just use the Modifier functions on the owning Character.
 	 * @param	bClientSimulation	true when called when bIsModifiered is replicated to non owned clients.
 	 */
-	virtual void ChangeModifier(uint8 NewLevel, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
+	virtual void ChangeModifiers(TArray<uint8> NewModifiers, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
 
+	/** Returns true if the character is allowed to Modifier in the current state. */
+	virtual TArray<uint8> GetModifiersForCurrentState() const;
+	
 	/** Returns true if the character is allowed to Modifier in the current state. */
 	virtual uint8 GetModifierLevelForCurrentState() const;
 
@@ -117,14 +130,13 @@ class PREDICTEDMOVEMENT_API FSavedMove_Character_Modifier : public FSavedMove_Ch
 
 public:
 	FSavedMove_Character_Modifier()
-		: WantsModifierLevel(0)
 	{
 	}
 
 	virtual ~FSavedMove_Character_Modifier() override
 	{}
 
-	uint8 WantsModifierLevel;
+	TArray<uint8> WantsModifiers;
 		
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;

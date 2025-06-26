@@ -43,7 +43,7 @@ public:
 	 * @see CharacterMovement->WantsToModifier
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation"))
-	virtual void AddModifier(bool bClientSimulation = false);
+	virtual void AddModifier(uint8 Level, bool bClientSimulation = false);
 
 	/**
 	 * Request the character to stop Modified. The request is processed on the next update of the CharacterMovementComponent.
@@ -52,7 +52,7 @@ public:
 	 * @see CharacterMovement->WantsToModifier
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation"))
-	virtual void RemoveModifier(bool bClientSimulation = false);
+	virtual void RemoveModifier(uint8 Level, bool bClientSimulation = false);
 
 	/** Called when Character stops Modified. Called on non-owned Characters through bIsModified replication. */
 	virtual void OnEndModifier();
