@@ -23,8 +23,17 @@ protected:
 	
 public:
 	/** Set by character movement to specify that this Character is currently Modified. */
-	UPROPERTY(BlueprintReadOnly, replicatedUsing=OnRep_IsModified, Category=Character)
-	uint32 bIsModified:1;
+	UPROPERTY(BlueprintReadOnly, replicatedUsing=OnRep_ModifierLevel, Category=Character)
+	uint8 ModifierLevel;
+
+	UPROPERTY(BlueprintReadOnly, Category=Character)
+	uint8 ModifierLevelOverrideDebug = UINT8_MAX;	
+
+	UFUNCTION(BlueprintCallable, Category=Character)
+	void OverrideModifierLevel(uint8 Level)
+	{
+		ModifierLevelOverrideDebug = Level;
+	}
 	
 public:
 	AModifierCharacter(const FObjectInitializer& FObjectInitializer);
@@ -34,7 +43,7 @@ public:
 public:
 	/** Handle Crouching replicated from server */
 	UFUNCTION()
-	virtual void OnRep_IsModified();
+	virtual void OnRep_ModifierLevel(uint8 PrevLevel);
 
 	/**
 	 * Request the character to start Modified. The request is processed on the next update of the CharacterMovementComponent.

@@ -14,10 +14,10 @@ public:
 	typedef FCharacterNetworkMoveData Super;
  
 	FModifierNetworkMoveData()
-		: bWantsToModifier(false)
+		: WantsModifierLevel(false)
 	{}
 
-	bool bWantsToModifier;
+	uint8 WantsModifierLevel;
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -61,38 +61,10 @@ public:
 	UPROPERTY(Category="Character Movement: Walking", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0", ForceUnits="cm/s"))
 	float MaxWalkSpeedModified;
 
-	/**
-	 * Deceleration when walking and not applying acceleration. This is a constant opposing force that directly lowers velocity by a constant value.
-	 * @see GroundFriction, MaxAcceleration
-	 */
-	UPROPERTY(Category="Character Movement: Walking", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0"))
-	float BrakingDecelerationModified;
-
-	/**
-	 * Setting that affects movement control. Higher values allow faster changes in direction.
-	 * If bUseSeparateBrakingFriction is false, also affects the ability to stop more quickly when braking (whenever Acceleration is zero), where it is multiplied by BrakingFrictionFactor.
-	 * When braking, this property allows you to control how much friction is applied when moving across the ground, applying an opposing force that scales with current velocity.
-	 * This can be used to simulate slippery surfaces such as ice or oil by changing the value (possibly based on the material pawn is standing on).
-	 * @see BrakingDecelerationWalking, BrakingFriction, bUseSeparateBrakingFriction, BrakingFrictionFactor
-	 */
-	UPROPERTY(Category="Character Movement: Walking", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0"))
-	float GroundFrictionModified;
-
-	/**
-	 * Friction (drag) coefficient applied when braking (whenever Acceleration = 0, or if character is exceeding max speed); actual value used is this multiplied by BrakingFrictionFactor.
-	 * When braking, this property allows you to control how much friction is applied when moving across the ground, applying an opposing force that scales with current velocity.
-	 * Braking is composed of friction (velocity-dependent drag) and constant deceleration.
-	 * This is the current value, used in all movement modes; if this is not desired, override it or bUseSeparateBrakingFriction when movement mode changes.
-	 * @note Only used if bUseSeparateBrakingFriction setting is true, otherwise current friction such as GroundFriction is used.
-	 * @see bUseSeparateBrakingFriction, BrakingFrictionFactor, GroundFriction, BrakingDecelerationWalking
-	 */
-	UPROPERTY(Category="Character Movement (General Settings)", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0", EditCondition="bUseSeparateBrakingFriction"))
-	float BrakingFrictionModified;
-
 public:
 	/** If true, try to Modifier (or keep Modified) on next update. If false, try to stop Modified on next update. */
 	UPROPERTY(Category="Character Movement (General Settings)", VisibleInstanceOnly, BlueprintReadOnly)
-	uint8 bWantsToModifier:1;
+	uint8 WantsModifierLevel;
 
 public:
 	UModifierMovement(const FObjectInitializer& ObjectInitializer);
@@ -110,23 +82,17 @@ public:
 	virtual void ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration) override;
 
 public:
-	virtual bool IsModified() const;
+	virtual uint8 GetModifierLevel() const;
 
 	/**
 	 * Call CharacterOwner->OnStartModifier() if successful.
-	 * In general you should set bWantsToModifier instead to have the Modifier persist during movement, or just use the Modifier functions on the owning Character.
+	 * In general you should set WantsModifierLevel instead to have the Modifier persist during movement, or just use the Modifier functions on the owning Character.
 	 * @param	bClientSimulation	true when called when bIsModifiered is replicated to non owned clients.
 	 */
-	virtual void Modifier(bool bClientSimulation = false);
-	
-	/**
-	 * Checks if default capsule size fits (no encroachment), and trigger OnEndModifier() on the owner if successful.
-	 * @param	bClientSimulation	true when called when bIsModifiered is replicated to non owned clients.
-	 */
-	virtual void UnModifier(bool bClientSimulation = false);
+	virtual void ChangeModifier(uint8 NewLevel, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
 
 	/** Returns true if the character is allowed to Modifier in the current state. */
-	virtual bool CanModifierInCurrentState() const;
+	virtual uint8 GetModifierLevelForCurrentState() const;
 
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
 	virtual void UpdateCharacterStateAfterMovement(float DeltaSeconds) override;
@@ -150,14 +116,14 @@ class PREDICTEDMOVEMENT_API FSavedMove_Character_Modifier : public FSavedMove_Ch
 
 public:
 	FSavedMove_Character_Modifier()
-		: bWantsToModifier(0)
+		: WantsModifierLevel(0)
 	{
 	}
 
 	virtual ~FSavedMove_Character_Modifier() override
 	{}
 
-	uint32 bWantsToModifier:1;
+	uint8 WantsModifierLevel;
 		
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;
@@ -170,6 +136,11 @@ public:
 
 	/** Set the properties describing the position, etc. of the moved pawn at the start of the move. */
 	virtual void SetInitialPosition(ACharacter* C) override;
+
+	/** Combine this move with an older move and update relevant state. */
+	virtual void CombineWith(const FSavedMove_Character* OldMove, ACharacter* InCharacter, APlayerController* PC, const FVector& OldStartLocation) override;
+
+	virtual bool IsImportantMove(const FSavedMovePtr& LastAckedMove) const override;
 };
 
 class PREDICTEDMOVEMENT_API FNetworkPredictionData_Client_Character_Modifier : public FNetworkPredictionData_Client_Character

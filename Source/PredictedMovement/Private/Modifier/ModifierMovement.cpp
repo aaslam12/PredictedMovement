@@ -21,7 +21,7 @@ void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Charac
 	// ➜ MoveAutonomous (UpdateFromCompressedFlags)
 	
 	const FSavedMove_Character_Modifier& SavedMove = static_cast<const FSavedMove_Character_Modifier&>(ClientMove);
-	bWantsToModifier = SavedMove.bWantsToModifier;
+	WantsModifierLevel = SavedMove.WantsModifierLevel;
 }
 
 bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar,
@@ -29,7 +29,7 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 {
 	Super::Serialize(CharacterMovement, Ar, PackageMap, MoveType);
 
-	Ar.SerializeBits(&bWantsToModifier, 1);
+	SerializeOptionalValue<uint8>(Ar.IsSaving(), Ar, WantsModifierLevel, 0);
 	
 	return !Ar.IsError();
 }
@@ -39,13 +39,10 @@ UModifierMovement::UModifierMovement(const FObjectInitializer& ObjectInitializer
 {
 	SetNetworkMoveDataContainer(ModifierMoveDataContainer);
 	
-	MaxAccelerationModified = 2324.f;
-	MaxWalkSpeedModified = 1600.f;
-	BrakingDecelerationModified = 512.f;
-	GroundFrictionModified = 12.f;
-	BrakingFrictionModified = 4.f;
+	MaxAccelerationModified = 250.f;
+	MaxWalkSpeedModified = 250.f;
 
-	bWantsToModifier = false;
+	WantsModifierLevel = false;
 }
 
 bool UModifierMovement::HasValidData() const
@@ -69,74 +66,48 @@ void UModifierMovement::SetUpdatedComponent(USceneComponent* NewUpdatedComponent
 
 float UModifierMovement::GetMaxAcceleration() const
 {
-	if (IsModified())
-	{
-		return MaxAccelerationModified;
-	}
-	return Super::GetMaxAcceleration();
+	const uint8 ModifierLevel = GetModifierLevel();
+	const float Modified = MaxAccelerationModified * ModifierLevel;
+	return Super::GetMaxAcceleration() + Modified;
 }
 
 float UModifierMovement::GetMaxSpeed() const
 {
-	if (IsModified())
-	{
-		return MaxWalkSpeedModified;
-	}
-	return Super::GetMaxSpeed();
+	const uint8 ModifierLevel = GetModifierLevel();
+	const float Modified = MaxWalkSpeedModified * ModifierLevel;
+	return Super::GetMaxSpeed() + Modified;
 }
 
 float UModifierMovement::GetMaxBrakingDeceleration() const
 {
-	if (IsModified())
+	if (GetModifierLevel())
 	{
-		return BrakingDecelerationModified;
 	}
 	return Super::GetMaxBrakingDeceleration();
 }
 
 void UModifierMovement::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)
 {
-	if (IsModified() && IsMovingOnGround())
+	if (GetModifierLevel() && IsMovingOnGround())
 	{
-		Friction = GroundFrictionModified;
 	}
 	Super::CalcVelocity(DeltaTime, Friction, bFluid, BrakingDeceleration);
 }
 
 void UModifierMovement::ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration)
 {
-	if (IsModified() && IsMovingOnGround())
+	if (GetModifierLevel() && IsMovingOnGround())
 	{
-		Friction = (bUseSeparateBrakingFriction ? BrakingFrictionModified : GroundFrictionModified);
 	}
 	Super::ApplyVelocityBraking(DeltaTime, Friction, BrakingDeceleration);
 }
 
-bool UModifierMovement::IsModified() const
+uint8 UModifierMovement::GetModifierLevel() const
 {
-	return ModifierCharacterOwner && ModifierCharacterOwner->bIsModified;
+	return ModifierCharacterOwner ? ModifierCharacterOwner->ModifierLevel : 0;
 }
 
-void UModifierMovement::Modifier(bool bClientSimulation)
-{
-	if (!HasValidData())
-	{
-		return;
-	}
-
-	if (!bClientSimulation && !CanModifierInCurrentState())
-	{
-		return;
-	}
-
-	if (!bClientSimulation)
-	{
-		ModifierCharacterOwner->bIsModified = true;
-	}
-	ModifierCharacterOwner->OnStartModifier();
-}
-
-void UModifierMovement::UnModifier(bool bClientSimulation)
+void UModifierMovement::ChangeModifier(uint8 NewLevel, bool bClientSimulation, uint8 PrevSimulatedLevel)
 {
 	if (!HasValidData())
 	{
@@ -145,40 +116,54 @@ void UModifierMovement::UnModifier(bool bClientSimulation)
 
 	if (!bClientSimulation)
 	{
-		ModifierCharacterOwner->bIsModified = false;
+		const uint8 PrevLevel = GetModifierLevel();
+		if (PrevLevel != NewLevel)
+		{
+			ModifierCharacterOwner->ModifierLevel = NewLevel;
+			// @TODO ModifierCharacterOwner->OnModifierChanged(ModifierType, ModifierLevel, PrevLevel);
+		}
 	}
-	ModifierCharacterOwner->OnEndModifier();
+	else
+	{
+		// @TODO ModifierCharacterOwner->OnModifierChanged(ModifierType, ModifierLevel, PrevSimulatedLevel);
+	}
 }
 
-bool UModifierMovement::CanModifierInCurrentState() const
+uint8 UModifierMovement::GetModifierLevelForCurrentState() const
 {
 	if (!UpdatedComponent || UpdatedComponent->IsSimulatingPhysics())
 	{
-		return false;
+		return 0;
 	}
 
 	if (!IsFalling() && !IsMovingOnGround())
 	{
-		return false;
+		return 0;
 	}
 
-	return true;
+	if (ModifierCharacterOwner->ModifierLevelOverrideDebug != UINT8_MAX)
+	{
+		return ModifierCharacterOwner->ModifierLevelOverrideDebug;
+	}
+
+	return WantsModifierLevel;
 }
 
 void UModifierMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 {
+	if (!HasValidData())
+	{
+		return;
+	}
+	
 	// Proxies get replicated Modifier state.
 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
 	{
-		// Check for a change in Modifier state. Players toggle Modifier by changing bWantsToModifier.
-		const bool bIsModified = IsModified();
-		if (bIsModified && (!bWantsToModifier || !CanModifierInCurrentState()))
+		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
+		const uint8 NewModifierLevel = GetModifierLevelForCurrentState();
+		if (NewModifierLevel != GetModifierLevel())
 		{
-			UnModifier(false);
-		}
-		else if (!bIsModified && bWantsToModifier && CanModifierInCurrentState())
-		{
-			Modifier(false);
+			ChangeModifier(NewModifierLevel);
 		}
 	}
 
@@ -190,10 +175,11 @@ void UModifierMovement::UpdateCharacterStateAfterMovement(float DeltaSeconds)
 	// Proxies get replicated Modifier state.
 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
 	{
-		// UnModifier if no longer allowed to be Modified
-		if (IsModified() && !CanModifierInCurrentState())
+		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
+		const uint8 NewModifierLevel = GetModifierLevelForCurrentState();
+		if (NewModifierLevel != GetModifierLevel())
 		{
-			UnModifier(false);
+			ChangeModifier(NewModifierLevel);
 		}
 	}
 
@@ -210,16 +196,16 @@ void UModifierMovement::ServerMove_PerformMovement(const FCharacterNetworkMoveDa
 	
 	const FModifierNetworkMoveData& ModifierMoveData = static_cast<const FModifierNetworkMoveData&>(MoveData);
 
-	bWantsToModifier = ModifierMoveData.bWantsToModifier;
+	WantsModifierLevel = ModifierMoveData.WantsModifierLevel;
 
 	Super::ServerMove_PerformMovement(MoveData);
 }
 
 bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 {
-	const bool bRealModifier = bWantsToModifier;
+	const uint8 RealWantsModifierLevel = WantsModifierLevel;
 	const bool bResult = Super::ClientUpdatePositionAfterServerUpdate();
-	bWantsToModifier = bRealModifier;
+	WantsModifierLevel = RealWantsModifierLevel;
 
 	return bResult;
 }
@@ -228,7 +214,7 @@ void FSavedMove_Character_Modifier::Clear()
 {
 	Super::Clear();
 
-	bWantsToModifier = false;
+	WantsModifierLevel = 0;
 }
 
 void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel,
@@ -236,7 +222,7 @@ void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime,
 {
 	Super::SetMoveFor(C, InDeltaTime, NewAccel, ClientData);
 
-	bWantsToModifier = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement()->bWantsToModifier;
+	WantsModifierLevel = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement()->WantsModifierLevel;
 }
 
 bool FSavedMove_Character_Modifier::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter,
@@ -261,7 +247,7 @@ bool FSavedMove_Character_Modifier::CanCombineWith(const FSavedMovePtr& NewMove,
 	// We can only combine moves if they will result in the same state as if both moves were processed individually,
 	// because the AutonomousProxy Client processes them individually prior to sending them to the server.
 	
-	if (bWantsToModifier != SavedMove->bWantsToModifier)
+	if (WantsModifierLevel != SavedMove->WantsModifierLevel)
 	{
 		return false;
 	}
@@ -278,7 +264,31 @@ void FSavedMove_Character_Modifier::SetInitialPosition(ACharacter* C)
 
 	// Retrieve the value from our CMC to revert the saved move value back to this.
 	
-	bWantsToModifier = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement()->bWantsToModifier;
+	WantsModifierLevel = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement()->WantsModifierLevel;
+}
+
+void FSavedMove_Character_Modifier::CombineWith(const FSavedMove_Character* OldMove, ACharacter* C,
+	APlayerController* PC, const FVector& OldStartLocation)
+{
+	Super::CombineWith(OldMove, C, PC, OldStartLocation);
+
+	const FSavedMove_Character_Modifier* SavedOldMove = static_cast<const FSavedMove_Character_Modifier*>(OldMove);
+
+	if (UModifierMovement* MoveComp = C ? Cast<UModifierMovement>(C->GetCharacterMovement()) : nullptr)
+	{
+		MoveComp->WantsModifierLevel = SavedOldMove->WantsModifierLevel;
+	}
+}
+
+bool FSavedMove_Character_Modifier::IsImportantMove(const FSavedMovePtr& LastAckedMove) const
+{
+	const TSharedPtr<FSavedMove_Character_Modifier>& SavedMove = StaticCastSharedPtr<FSavedMove_Character_Modifier>(LastAckedMove);
+	if (WantsModifierLevel != SavedMove->WantsModifierLevel)
+	{
+		return true;
+	}
+	
+	return Super::IsImportantMove(LastAckedMove);
 }
 
 FSavedMovePtr FNetworkPredictionData_Client_Character_Modifier::AllocateNewMove()
