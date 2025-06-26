@@ -107,6 +107,7 @@ public:
 	
 	/** Returns true if the character is allowed to Modifier in the current state. */
 	virtual uint8 GetModifierLevelForCurrentState() const;
+	void UpdateModifierMovementState();
 
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
 	virtual void UpdateCharacterStateAfterMovement(float DeltaSeconds) override;

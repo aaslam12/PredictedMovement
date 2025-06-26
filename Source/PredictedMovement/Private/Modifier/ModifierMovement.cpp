@@ -131,6 +131,7 @@ void UModifierMovement::ChangeModifiers(TArray<uint8> NewModifiers, bool bClient
 		const TArray<uint8> PrevModifiers = Modifiers;
 		if (PrevModifiers != NewModifiers)
 		{
+			const uint8 PrevLevel = GetModifierLevel();
 			Modifiers = NewModifiers;
 			
 			if (ModifierCharacterOwner->HasAuthority())
@@ -176,13 +177,13 @@ uint8 UModifierMovement::GetModifierLevelForCurrentState() const
 	return GetWantedModifierLevel();
 }
 
-void UModifierMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
+void UModifierMovement::UpdateModifierMovementState()
 {
 	if (!HasValidData())
 	{
 		return;
 	}
-	
+
 	// Proxies get replicated Modifier state.
 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
 	{
@@ -193,22 +194,18 @@ void UModifierMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 			ChangeModifiers(NewModifiers);
 		}
 	}
+}
+
+void UModifierMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
+{
+	UpdateModifierMovementState();
 
 	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
 }
 
 void UModifierMovement::UpdateCharacterStateAfterMovement(float DeltaSeconds)
 {
-	// Proxies get replicated Modifier state.
- 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
-	{
-		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
-		const TArray<uint8> NewModifiers = GetModifiersForCurrentState();
-		if (NewModifiers != Modifiers)
-		{
-			ChangeModifiers(NewModifiers);
-		}
-	}
+	UpdateModifierMovementState();
 
 	Super::UpdateCharacterStateAfterMovement(DeltaSeconds);
 }
