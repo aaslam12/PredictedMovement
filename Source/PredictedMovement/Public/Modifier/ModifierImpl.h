@@ -285,6 +285,16 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 		return false;
 	}
 
+	bool ResetModifiers()
+	{
+		if (Data.WantsModifiers.Num() > 0)
+		{
+			Data.WantsModifiers.Reset();
+			return true;
+		}
+		return false;
+	}
+
 	bool UpdateMovementState(bool bAllowedInCurrentState)
 	{
 		const TArray<TEnum> Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TArray<TEnum>();
@@ -374,6 +384,16 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated
 		return false;
 	}
 
+	bool ResetModifiers()
+	{
+		if (Data.WantsModifiers.Num() > 0)
+		{
+			Data.WantsModifiers.Reset();
+			return true;
+		}
+		return false;
+	}
+
 	bool UpdateMovementState(bool bAllowedInCurrentState)
 	{
 		const TArray<TEnum> Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TArray<TEnum>();
@@ -404,15 +424,16 @@ struct PREDICTEDMOVEMENT_API FModifierStatics
 	typename TCorrection,
 	typename TServer>
 	static bool ProcessModifiers(
-	T& OutCurrentLevel,
+	T& CurrentLevel,
 	EModifierLevelMethod Method,
 	const TArray<FGameplayTag>& LevelTags,
+	T InvalidLevel,
 	TLocalPredicted* Local,
 	TCorrection* Correction,
 	TServer* Server,
 	TFunctionRef<bool()> CanActivateCallback)
 	{
-		const T PrevLevel = OutCurrentLevel;
+		const T PrevLevel = CurrentLevel;
 		bool bStateChanged = false;
 
 		// Update state
@@ -426,23 +447,18 @@ struct PREDICTEDMOVEMENT_API FModifierStatics
 			const T MaxLevel = LevelTags.Num() > 0 ? static_cast<T>(LevelTags.Num() - 1) : 0;
 
 			// Update the modifier levels based on the method
-			const T LocalLevel      = Local		 ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Local->Data.Modifiers, MaxLevel) : 0;
-			const T CorrectionLevel = Correction ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Correction->Data.Modifiers, MaxLevel) : 0;
-			const T ServerLevel     = Server	 ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Server->Data.Modifiers, MaxLevel) : 0;
+			const T LocalLevel      = Local		 ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Local->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
+			const T CorrectionLevel = Correction ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Correction->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
+			const T ServerLevel     = Server	 ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Server->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
 
 			// Combine the levels into a single current level
 			TArray<T> Levels;
-			if (LocalLevel > 0)      { Levels.Add(LocalLevel); }
-			if (CorrectionLevel > 0) { Levels.Add(CorrectionLevel); }
-			if (ServerLevel > 0)     { Levels.Add(ServerLevel); }
-			if (Levels.IsEmpty())
-			{
-				OutCurrentLevel = 0;
-				return PrevLevel != OutCurrentLevel;
-			}
-			
-			OutCurrentLevel = FModifierStatics::CombineModifierLevels<T>(Method, Levels, MaxLevel);
-			return OutCurrentLevel != PrevLevel;
+			if (LocalLevel != InvalidLevel)      { Levels.Add(LocalLevel); }
+			if (CorrectionLevel != InvalidLevel) { Levels.Add(CorrectionLevel); }
+			if (ServerLevel != InvalidLevel)     { Levels.Add(ServerLevel); }
+
+			CurrentLevel = Levels.Num() > 0 ? FModifierStatics::CombineModifierLevels<T>(Method, Levels, MaxLevel, InvalidLevel) : InvalidLevel;
+			return CurrentLevel != PrevLevel;
 		}
 
 		return false;
@@ -455,7 +471,7 @@ struct PREDICTEDMOVEMENT_API FModifierStatics
 	}
 	
 	template <typename T, typename TEnum>
-	static T UpdateModifierLevel(EModifierLevelMethod Method, const TArray<TEnum>& Modifiers, uint8 MaxLevel)
+	static T UpdateModifierLevel(EModifierLevelMethod Method, const TArray<TEnum>& Modifiers, uint8 MaxLevel, T InvalidLevel)
 	{
 		static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
 			"UpdateModifierLevel only supports uint8, uint16, or uint32 as T.");
@@ -465,6 +481,11 @@ struct PREDICTEDMOVEMENT_API FModifierStatics
 
 		using Underlying = std::underlying_type_t<TEnum>;
 
+		if (Modifiers.IsEmpty())
+		{
+			return InvalidLevel;
+		}
+		
 		T NewLevel = 0;
 
 		switch (Method)
@@ -512,14 +533,14 @@ struct PREDICTEDMOVEMENT_API FModifierStatics
 	}
 
 	template <typename T>
-	static T CombineModifierLevels(EModifierLevelMethod Method, const TArray<T>& ModifierLevels, uint8 MaxLevel)
+	static T CombineModifierLevels(EModifierLevelMethod Method, const TArray<T>& ModifierLevels, uint8 MaxLevel, T InvalidLevel)
 	{
 		static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
 			"CombineModifierLevels only supports uint8, uint16, or uint32 as T.");
 
 		if (ModifierLevels.IsEmpty())
 		{
-			return 0;
+			return InvalidLevel;
 		}
 
 		T NewLevel = 0;

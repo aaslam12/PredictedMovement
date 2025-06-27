@@ -10,39 +10,31 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModifierCharacter)
 
-void AModifierCharacter::OnModifierChanged(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
-	const FGameplayTag& PrevModifierLevel, uint8 ModifierLevelValue, uint8 PrevModifierLevelValue)
-{
-	if (ModifierLevelValue > 0 && PrevModifierLevelValue == 0)
-	{
-		OnModifierAdded(ModifierType, ModifierLevel, PrevModifierLevel, ModifierLevelValue, PrevModifierLevelValue);
-	}
-	else if (ModifierLevelValue == 0 && PrevModifierLevelValue > 0)
-	{
-		OnModifierRemoved(ModifierType, ModifierLevel, PrevModifierLevel, ModifierLevelValue, PrevModifierLevelValue);
-	}
 
+void AModifierCharacter::OnModifierChanged(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
+	const FGameplayTag& PrevModifierLevel)
+{
 	K2_OnModifierChanged(ModifierType, ModifierLevel, PrevModifierLevel);
 
 	// Replicate to simulated proxies
-	if (HasAuthority())
+	if (ModifierMovement && HasAuthority())
 	{
 		if (ModifierType == FModifierTags::Modifier_Boost)
 		{
-			SimulatedBoost = ModifierLevelValue;
+			SimulatedBoost = ModifierMovement->GetBoostLevelIndex(ModifierLevel);
 			MARK_PROPERTY_DIRTY_FROM_NAME(ThisClass, SimulatedBoost, this);
 		}
 	}
 }
 
-void AModifierCharacter::OnModifierAdded(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel, const FGameplayTag& PrevModifierLevel, uint8
-	ModifierLevelValue, uint8 PrevModifierLevelValue)
+void AModifierCharacter::OnModifierAdded(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
+	const FGameplayTag& PrevModifierLevel)
 {
 	K2_OnModifierAdded(ModifierType, ModifierLevel, PrevModifierLevel);
 }
 
 void AModifierCharacter::OnModifierRemoved(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
-	const FGameplayTag& PrevModifierLevel, uint8 ModifierLevelValue, uint8 PrevModifierLevelValue)
+	const FGameplayTag& PrevModifierLevel)
 {
 	K2_OnModifierRemoved(ModifierType, ModifierLevel, PrevModifierLevel);
 }
@@ -71,14 +63,14 @@ void AModifierCharacter::OnRep_SimulatedBoost(uint8 PrevLevel)
 	{
 		const FGameplayTag PrevBoostLevel = ModifierMovement->GetBoostLevel();
 		ModifierMovement->BoostLevel = SimulatedBoost;
-		OnModifierChanged(FModifierTags::Modifier_Boost, ModifierMovement->GetBoostLevel(),
-			PrevBoostLevel, ModifierMovement->BoostLevel, PrevLevel);
+		NotifyModifierChanged(FModifierTags::Modifier_Boost, ModifierMovement->GetBoostLevel(),
+			PrevBoostLevel, ModifierMovement->BoostLevel, PrevLevel, UINT8_MAX);
 
 		ModifierMovement->bNetworkUpdateReceived = true;
 	}
 }
 
-bool AModifierCharacter::Boost(FGameplayTag Level, EModifierNetType NetType, bool bClientSimulation)
+bool AModifierCharacter::Boost(FGameplayTag Level, EModifierNetType NetType)
 {
 	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy && Level.IsValid())
 	{
@@ -105,7 +97,7 @@ bool AModifierCharacter::Boost(FGameplayTag Level, EModifierNetType NetType, boo
 	return false;
 }
 
-bool AModifierCharacter::UnBoost(FGameplayTag Level, EModifierNetType NetType, bool bClientSimulation)
+bool AModifierCharacter::UnBoost(FGameplayTag Level, EModifierNetType NetType)
 {
 	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy && Level.IsValid())
 	{
@@ -125,6 +117,27 @@ bool AModifierCharacter::UnBoost(FGameplayTag Level, EModifierNetType NetType, b
 			if (HasAuthority())
 			{
 				return ModifierMovement->BoostServer.RemoveModifier(LevelIndex);
+			}
+		default: return false;
+		}
+	}
+	return false;
+}
+
+bool AModifierCharacter::ResetBoost(EModifierNetType NetType)
+{
+	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy)
+	{
+		switch (NetType)
+		{
+		case EModifierNetType::LocalPredicted:
+			return ModifierMovement->BoostLocal.ResetModifiers();
+		case EModifierNetType::WithCorrection:
+			return ModifierMovement->BoostCorrection.ResetModifiers();
+		case EModifierNetType::ServerInitiated:
+			if (HasAuthority())
+			{
+				return ModifierMovement->BoostServer.ResetModifiers();
 			}
 		default: return false;
 		}

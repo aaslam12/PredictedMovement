@@ -24,14 +24,25 @@ protected:
 	FORCEINLINE UModifierMovement* GetModifierCharacterMovement() const { return ModifierMovement; }
 
 public:
-	virtual void OnModifierChanged(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
-		const FGameplayTag& PrevModifierLevel, uint8 ModifierLevelValue, uint8 PrevModifierLevelValue);
+	template<typename T>
+	void NotifyModifierChanged(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
+		const FGameplayTag& PrevModifierLevel, T ModifierLevelValue, T PrevModifierLevelValue, T InvalidLevel)
+	{
+		if (ModifierLevelValue != InvalidLevel && PrevModifierLevelValue == InvalidLevel)
+		{
+			OnModifierAdded(ModifierType, ModifierLevel, PrevModifierLevel);
+		}
+		else if (ModifierLevelValue == InvalidLevel && PrevModifierLevelValue != InvalidLevel)
+		{
+			OnModifierRemoved(ModifierType, ModifierLevel, PrevModifierLevel);
+		}
+		
+		OnModifierChanged(ModifierType, ModifierLevel, PrevModifierLevel);
+	}
 	
-	virtual void OnModifierAdded(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
-		const FGameplayTag& PrevModifierLevel, uint8 ModifierLevelValue, uint8 PrevModifierLevelValue);
-	
-	virtual void OnModifierRemoved(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
-		const FGameplayTag& PrevModifierLevel, uint8 ModifierLevelValue, uint8 PrevModifierLevelValue);
+	virtual void OnModifierChanged(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel, const FGameplayTag& PrevModifierLevel);
+	virtual void OnModifierAdded(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel, const FGameplayTag& PrevModifierLevel);
+	virtual void OnModifierRemoved(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel, const FGameplayTag& PrevModifierLevel);
 
 	UFUNCTION(BlueprintImplementableEvent, Category=Character, meta=(DisplayName="On Modifier Added"))
 	void K2_OnModifierAdded(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel, const FGameplayTag& PrevModifierLevel);
@@ -62,8 +73,8 @@ public:
 	 * @see IsModified
 	 * @see CharacterMovement->WantsToModifier
 	 */
-	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation", GameplayTagFilter="Modifier.Boost"))
-	virtual bool Boost(FGameplayTag Level, EModifierNetType NetType, bool bClientSimulation = false);
+	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Boost"))
+	virtual bool Boost(FGameplayTag Level, EModifierNetType NetType);
 
 	/**
 	 * Request the character to stop Modified. The request is processed on the next update of the CharacterMovementComponent.
@@ -71,6 +82,9 @@ public:
 	 * @see IsModified
 	 * @see CharacterMovement->WantsToModifier
 	 */
-	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation", GameplayTagFilter="Modifier.Boost"))
-	virtual bool UnBoost(FGameplayTag Level, EModifierNetType NetType, bool bClientSimulation = false);
+	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Boost"))
+	virtual bool UnBoost(FGameplayTag Level, EModifierNetType NetType);
+
+	UFUNCTION(BlueprintCallable, Category=Character)
+	virtual bool ResetBoost(EModifierNetType NetType);
 };

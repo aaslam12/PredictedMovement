@@ -236,18 +236,14 @@ void UModifierMovement::UpdateModifierMovementState()
 
 		{	// Boost
 			const FGameplayTag PrevBoostLevel = GetBoostLevel();
-			const uint8 PrevLevel = BoostLevel;
-			if (FModifierStatics::ProcessModifiers<uint8, EModifierByte>(
-				BoostLevel,
-				BoostLevelMethod,
-				BoostLevels,
-				&BoostLocal,
-				&BoostCorrection,
-				&BoostServer,
+			const uint8 PrevBoostLevelValue = BoostLevel;
+			if (FModifierStatics::ProcessModifiers<uint8, EModifierByte>(BoostLevel, BoostLevelMethod, BoostLevels, UINT8_MAX,
+				&BoostLocal, &BoostCorrection, &BoostServer,
 				[this]() { return CanBoostInCurrentState(); }))
 			{
-				ModifierCharacterOwner->OnModifierChanged(FModifierTags::Modifier_Boost, GetBoostLevel(),
-					PrevBoostLevel, BoostLevel, PrevLevel);
+				ModifierCharacterOwner->NotifyModifierChanged(FModifierTags::Modifier_Boost,
+					GetBoostLevel(), PrevBoostLevel, BoostLevel,
+					PrevBoostLevelValue, UINT8_MAX);
 			}
 		}
 	}

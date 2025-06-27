@@ -132,7 +132,7 @@ public:
 public:
 	/* BOOST Implementation */
 
-	uint8 BoostLevel = 0;
+	uint8 BoostLevel = UINT8_MAX;
 	const FMovementModifierParams* GetBoostParams() const { return Boost.Find(GetBoostLevel()); }
 	FGameplayTag GetBoostLevel() const { return BoostLevels.IsValidIndex(BoostLevel) ? BoostLevels[BoostLevel] : FGameplayTag::EmptyTag; }
 	uint8 GetBoostLevelIndex(const FGameplayTag& Level) const { return BoostLevels.IndexOfByKey(Level) > INDEX_NONE ? BoostLevels.IndexOfByKey(Level) : UINT8_MAX; }
