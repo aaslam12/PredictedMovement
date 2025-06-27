@@ -180,7 +180,7 @@ bool AModifierCharacter::Snare(FGameplayTag Level)
 	return false;
 }
 
-bool AModifierCharacter::UnSnare(FGameplayTag Level)
+bool AModifierCharacter::UnSnare(FGameplayTag Level, bool bRemoveAll)
 {
 	if (ModifierMovement && HasAuthority() && Level.IsValid())
 	{
@@ -190,7 +190,7 @@ bool AModifierCharacter::UnSnare(FGameplayTag Level)
 			return false;
 		}
 
-		return ModifierMovement->SnareServer.RemoveModifier(LevelIndex);
+		return ModifierMovement->SnareServer.RemoveModifier(LevelIndex, bRemoveAll);
 	}
 	return false;
 }

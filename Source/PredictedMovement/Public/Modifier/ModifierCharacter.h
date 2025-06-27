@@ -118,7 +118,7 @@ public:
 	 * @see CharacterMovement->WantsToModifier
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Snare"))
-	virtual bool UnSnare(FGameplayTag Level);
+	virtual bool UnSnare(FGameplayTag Level, bool bRemoveAll=false);
 
 	UFUNCTION(BlueprintCallable, Category=Character)
 	virtual bool ResetSnare();
