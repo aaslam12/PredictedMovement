@@ -4,66 +4,56 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "ModifierCompression.h"
 #include "ModifierTypes.h"
-#include "Algo/Accumulate.h"
-#include "Algo/MaxElement.h"
-#include "Algo/MinElement.h"
 
+using TModSize = uint8;  // If you want more than 255 modifiers, change this to uint16 or uint32
+using TModifierStack = TArray<TModSize>;
 
-template <typename T>
-struct TIsValidModifierEnum : std::false_type {};
-
-template <>
-struct TIsValidModifierEnum<EModifierByte> : std::true_type {};
-
-template <>
-struct TIsValidModifierEnum<EModifierShort> : std::true_type {};
-
-template <>
-struct TIsValidModifierEnum<EModifierLong> : std::true_type {};
+/**
+ * Represents a single modifier that can be applied to a character
+ */
+struct PREDICTEDMOVEMENT_API FMovementModifierData
+{
+	/** The requested input state, which requests modifiers of the specified level */
+	TModifierStack WantsModifiers;
+	
+	/** The actual state, which represents the actual modifiers applied to the character */
+	TModifierStack Modifiers;
+};
 
 /**
  * FSavedMove_Character
  */
-template <typename T, typename TEnum>
 struct PREDICTEDMOVEMENT_API FModifierSavedMove
 {
-	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-				  "FModifierSavedMove only supports uint8, uint16, or uint32 as T.");
-
-	static_assert(TIsValidModifierEnum<TEnum>::value,
-		"FModifierSavedMove only supports EModifierByte, EModifierShort, or EModifierLong as TEnum.");
-	
-	T WantsModifiers;
+	TModifierStack WantsModifiers;
 
 	FModifierSavedMove()
-		: WantsModifiers(0)
 	{}
 	
 	virtual ~FModifierSavedMove() = default;
 
 	virtual void Clear()
 	{
-		WantsModifiers = 0;
+		WantsModifiers.Empty();
 	}
 
-	void SetMoveFor(TArray<TEnum> Modifiers)
+	void SetMoveFor(const TModifierStack& Modifiers)
 	{
-		WantsModifiers = FModifierCompression::GetBitmaskFromModifiers(Modifiers);
+		WantsModifiers = Modifiers;
 	}
 
-	bool CanCombineWith(T Modifiers) const
+	bool CanCombineWith(const TModifierStack& Modifiers) const
 	{
 		return WantsModifiers == Modifiers;
 	}
 
-	void SetInitialPosition(TArray<TEnum> Modifiers)
+	void SetInitialPosition(const TModifierStack& Modifiers)
 	{
-		WantsModifiers = FModifierCompression::GetBitmaskFromModifiers(Modifiers);
+		WantsModifiers = Modifiers;
 	}
 
-	bool IsImportantMove(T Modifiers) const
+	bool IsImportantMove(const TModifierStack& Modifiers) const
 	{
 		return WantsModifiers != Modifiers;
 	}
@@ -72,62 +62,45 @@ struct PREDICTEDMOVEMENT_API FModifierSavedMove
 /**
  * FSavedMove_Character
  */
-template <typename T, typename TEnum>
-struct PREDICTEDMOVEMENT_API FModifierSavedMove_WithCorrection final : FModifierSavedMove<T, TEnum>
+struct PREDICTEDMOVEMENT_API FModifierSavedMove_WithCorrection final : FModifierSavedMove
 {
-	using Super = FModifierSavedMove<T, TEnum>;
+	using Super = FModifierSavedMove;
 	
-	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-				  "FModifierSavedMove only supports uint8, uint16, or uint32 as T.");
-
-	static_assert(TIsValidModifierEnum<TEnum>::value,
-		"FModifierSavedMove only supports EModifierByte, EModifierShort, or EModifierLong as TEnum.");
-	
-	T Modifiers;
+	TModifierStack Modifiers;
 
 	FModifierSavedMove_WithCorrection()
-		: Super()
-		, Modifiers(0)
 	{}
 
 	virtual void Clear() override
 	{
 		Super::Clear();
-		Modifiers = 0;
+		Modifiers = {};
 	}
 
-	void PostUpdate(TArray<TEnum> InModifiers)
+	void PostUpdate(const TModifierStack& InModifiers)
 	{
-		Modifiers = FModifierCompression::GetBitmaskFromModifiers(InModifiers);
+		Modifiers = InModifiers;
 	}
 };
 
 /**
  * FSavedMove_Character
  */
-template <typename T, typename TEnum>
 struct PREDICTEDMOVEMENT_API FModifierSavedMove_ServerInitiated
 {
-	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-				  "FModifierSavedMove only supports uint8, uint16, or uint32 as T.");
-
-	static_assert(TIsValidModifierEnum<TEnum>::value,
-		"FModifierSavedMove only supports EModifierByte, EModifierShort, or EModifierLong as TEnum.");
-	
-	T Modifiers;
+	TModifierStack Modifiers;
 
 	FModifierSavedMove_ServerInitiated()
-		: Modifiers(0)
 	{}
 
 	void Clear()
 	{
-		Modifiers = 0;
+		Modifiers.Empty();
 	}
 
-	void PostUpdate(TArray<TEnum> InModifiers)
+	void PostUpdate(const TModifierStack& InModifiers)
 	{
-		Modifiers = FModifierCompression::GetBitmaskFromModifiers(InModifiers);
+		Modifiers = InModifiers;
 	}
 };
 
@@ -135,20 +108,13 @@ struct PREDICTEDMOVEMENT_API FModifierSavedMove_ServerInitiated
  * FCharacterMoveResponseDataContainer
  * Only required when using WithCorrection or ServerInitiated modifiers
  */
-template <typename T, typename TEnum>
 struct PREDICTEDMOVEMENT_API FModifierMoveResponse
 {
-	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-	"FModifierMoveResponse only supports uint8, uint16, or uint32 as T.");
+	TModifierStack Modifiers;
 
-	static_assert(TIsValidModifierEnum<TEnum>::value,
-		"FModifierMoveResponse only supports EModifierByte, EModifierShort, or EModifierLong as TEnum.");
-	
-	T Modifiers;
-
-	void ServerFillResponseData(TArray<TEnum> InModifiers)
+	void ServerFillResponseData(const TModifierStack& InModifiers)
 	{
-		Modifiers = FModifierCompression::GetBitmaskFromModifiers(InModifiers);  // AUTH
+		Modifiers = InModifiers;
 	}
 };
 
@@ -156,22 +122,19 @@ struct PREDICTEDMOVEMENT_API FModifierMoveResponse
  * FCharacterNetworkMoveData
  * Sends wanted modifiers (via input) to the server to be applied to the character
  */
-template <typename T>
 struct PREDICTEDMOVEMENT_API FModifierMoveData_LocalPredicted
 {
-	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-	              "FModifierMoveData only supports uint8, uint16, or uint32 as T.");
-
 	FModifierMoveData_LocalPredicted()
-		: WantsModifiers(0)
 	{}
 	
-	T WantsModifiers;
+	TModifierStack WantsModifiers;
 
-	void ClientFillNetworkMoveData(T InWantsModifiers)
+	void ClientFillNetworkMoveData(const TModifierStack& InWantsModifiers)
 	{
 		WantsModifiers = InWantsModifiers;
 	}
+
+	bool Serialize(FArchive& Ar, const FString& ErrorName, uint8 MaxSerializedModifiers=8);
 };
 
 /**
@@ -179,66 +142,40 @@ struct PREDICTEDMOVEMENT_API FModifierMoveData_LocalPredicted
  * Sends wanted modifiers (via input) to the server to be applied to the character
  * Server compares the client and server modifiers to know when to send a net correction to the client with updated modifiers
  */
-template <typename T>
 struct PREDICTEDMOVEMENT_API FModifierMoveData_WithCorrection
 {
-	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-				  "FModifierMoveData only supports uint8, uint16, or uint32 as T.");
-
 	FModifierMoveData_WithCorrection()
-		: WantsModifiers(0)
-		, Modifiers(0)
 	{}
 
-	T WantsModifiers;
-	T Modifiers;
+	TModifierStack WantsModifiers;
+	TModifierStack Modifiers;
 
-	void ClientFillNetworkMoveData(T InWantsModifiers, T InModifiers)
+	void ClientFillNetworkMoveData(const TModifierStack& InWantsModifiers, const TModifierStack& InModifiers)
 	{
 		WantsModifiers = InWantsModifiers;
 		Modifiers = InModifiers;
 	}
+
+	bool Serialize(FArchive& Ar, const FString& ErrorName, uint8 MaxSerializedModifiers=8);
 };
 
 /**
  * FCharacterNetworkMoveData
  * Used by server to compare between client and server, to know when to send a net correction to the client with updated modifiers
  */
-template <typename T>
 struct PREDICTEDMOVEMENT_API FModifierMoveData_ServerInitiated
 {
-	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-				  "FModifierMoveData only supports uint8, uint16, or uint32 as T.");
-
 	FModifierMoveData_ServerInitiated()
-		: Modifiers(0)
 	{}
 	
-	T Modifiers;
+	TModifierStack Modifiers;
 
-	void ClientFillNetworkMoveData(T InModifiers)
+	void ClientFillNetworkMoveData(const TModifierStack& InModifiers)
 	{
 		Modifiers = InModifiers;
 	}
-};
 
-/**
- * Represents a single modifier that can be applied to a character
- */
-template <typename TEnum>
-struct PREDICTEDMOVEMENT_API FMovementModifierData
-{
-	/**
-	 * The requested input state, which requests modifiers of the specified level
-	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
-	 */
-	TArray<TEnum> WantsModifiers;
-	
-	/**
-	 * The actual state, which represents the actual modifiers applied to the character
-	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
-	 */
-	TArray<TEnum> Modifiers;
+	bool Serialize(FArchive& Ar, const FString& ErrorName, uint8 MaxSerializedModifiers=8);
 };
 
 /**
@@ -246,38 +183,24 @@ struct PREDICTEDMOVEMENT_API FMovementModifierData
  * Local Predicted modifier is activated via player input and is predicted on the client
  * e.g. Sprint, Crouch, etc.
  */
-template <typename T, typename TEnum>
 struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 {
 	FMovementModifier_LocalPredicted()
-		: BitSize(sizeof(T) * 8)
 	{}
 
-	const uint8 BitSize;
-	
-	FMovementModifierData<EModifierByte> Data;
+	FMovementModifierData Data;
 
-	T GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
-	T GetModifierLevel() const { return Data.Modifiers.Num(); }
+	TModSize GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
+	TModSize GetModifierLevel() const { return Data.Modifiers.Num(); }
 
-	bool AddModifier(T InLevel)
+	bool AddModifier(TModSize Level)
 	{
-		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return false; }
-		
-		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
-		if (!Data.WantsModifiers.Contains(Level))
-		{
-			Data.WantsModifiers.Add(Level);
-			return true;
-		}
-		return false;
+		Data.WantsModifiers.Add(Level);
+		return true;
 	}
 
-	bool RemoveModifier(T InLevel)
+	bool RemoveModifier(TModSize Level)
 	{
-		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return false; }
-		
-		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
 		if (Data.WantsModifiers.Contains(Level))
 		{
 			Data.WantsModifiers.Remove(Level);
@@ -298,7 +221,7 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 
 	bool UpdateMovementState(bool bAllowedInCurrentState)
 	{
-		const TArray<TEnum> Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TArray<TEnum>();
+		const TModifierStack Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TModifierStack();
 		if (Data.Modifiers != Modifiers)
 		{
 			Data.Modifiers = Modifiers;
@@ -307,14 +230,14 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 		return false;
 	}
 
-	void ServerMove_PerformMovement(T WantsModifiers)
+	void ServerMove_PerformMovement(const TModifierStack& WantsModifiers)
 	{
-		Data.WantsModifiers = FModifierCompression::SetModifiersFromBitmask<TEnum>(WantsModifiers);
+		Data.WantsModifiers = WantsModifiers;
 	}
 
-	void CombineWith(T WantsModifiers)
+	void CombineWith(const TModifierStack& WantsModifiers)
 	{
-		Data.WantsModifiers = FModifierCompression::SetModifiersFromBitmask<TEnum>(WantsModifiers);
+		Data.WantsModifiers = WantsModifiers;
 	}
 };
 
@@ -324,17 +247,16 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
  * However, if the server disagrees with the client, it will correct the client
  * e.g. Speed increase after equipping a knife via predicted inventory ability, etc.
  */
-template <typename T, typename TEnum>
-struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted_WithCorrection final : FMovementModifier_LocalPredicted<T, TEnum>
+struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted_WithCorrection final : FMovementModifier_LocalPredicted
 {
-	bool ServerCheckClientError(T Modifiers)
+	bool ServerCheckClientError(const TModifierStack& Modifiers) const
 	{
-		return FModifierCompression::GetBitmaskFromModifiers(this->Data.Modifiers) != Modifiers;
+		return Data.Modifiers != Modifiers;
 	}
 
-	void OnClientCorrectionReceived(T Modifiers)
+	void OnClientCorrectionReceived(const TModifierStack& Modifiers)
 	{
-		this->Data.WantsModifiers = FModifierCompression::SetModifiersFromBitmask<TEnum>(Modifiers);
+		Data.WantsModifiers = Modifiers;
 	}
 };
 
@@ -343,40 +265,24 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted_WithCorrection fin
  * Server Authority modifier is activated by the server and is not predicted on the client
  * e.g. Snare from a damage event, speed increase after equipping a knife from a server event, etc.
  */
-template <typename T, typename TEnum>
 struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated
 {
 	FMovementModifier_ServerInitiated()
-		: BitSize(sizeof(T) * 8)
 	{}
 
-	const uint8 BitSize;
-	
-	FMovementModifierData<EModifierByte> Data;
+	FMovementModifierData Data;
 
-	T GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
-	T GetModifierLevel() const { return Data.Modifiers.Num(); }
+	TModSize GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
+	TModSize GetModifierLevel() const { return Data.Modifiers.Num(); }
 
-	bool AddModifier(T InLevel)
+	bool AddModifier(TModSize Level)
 	{
-		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return false; }
-		
-		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
-		if (!Data.WantsModifiers.Contains(Level))
-		{
-			Data.WantsModifiers.Add(Level);
-			return true;
-		}
-		return false;
+		Data.WantsModifiers.Add(Level);
+		return true;
 	}
 
-	// @TODO move everything to cpp
-
-	bool RemoveModifier(T InLevel)
+	bool RemoveModifier(TModSize Level)
 	{
-		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return false; }
-		
-		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
 		if (Data.WantsModifiers.Contains(Level))
 		{
 			Data.WantsModifiers.Remove(Level);
@@ -397,7 +303,7 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated
 
 	bool UpdateMovementState(bool bAllowedInCurrentState)
 	{
-		const TArray<TEnum> Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TArray<TEnum>();
+		const TModifierStack Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TModifierStack();
 		if (Data.Modifiers != Modifiers)
 		{
 			Data.Modifiers = Modifiers;
@@ -406,35 +312,39 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated
 		return false;
 	}
 	
-	bool ServerCheckClientError(T Modifiers)
+	bool ServerCheckClientError(const TModifierStack& Modifiers) const
 	{
-		return FModifierCompression::GetBitmaskFromModifiers(this->Data.Modifiers) != Modifiers;
+		return Data.Modifiers != Modifiers;
 	}
 
-	void OnClientCorrectionReceived(T Modifiers)
+	void OnClientCorrectionReceived(const TModifierStack& Modifiers)
 	{
-		Data.WantsModifiers = FModifierCompression::SetModifiersFromBitmask<TEnum>(Modifiers);
+		Data.WantsModifiers = Modifiers;
 	}
 };
 
 struct PREDICTEDMOVEMENT_API FModifierStatics
 {
+	static bool NetSerialize(TModifierStack& Modifiers, FArchive& Ar, const FString& ErrorName, uint8 MaxSerializedModifiers=8);
+
+	static TModSize UpdateModifierLevel(EModifierLevelMethod Method, const TModifierStack& Modifiers, TModSize MaxLevel, TModSize InvalidLevel);
+	static TModSize CombineModifierLevels(EModifierLevelMethod Method, const TModifierStack& ModifierLevels, TModSize MaxLevel, TModSize InvalidLevel);
+	
 	template<
-	typename T, typename TEnum,
 	typename TLocalPredicted,
 	typename TCorrection,
 	typename TServer>
 	static bool ProcessModifiers(
-	T& CurrentLevel,
+	TModSize& CurrentLevel,
 	EModifierLevelMethod Method,
 	const TArray<FGameplayTag>& LevelTags,
-	T InvalidLevel,
+	TModSize InvalidLevel,
 	TLocalPredicted* Local,
 	TCorrection* Correction,
 	TServer* Server,
 	TFunctionRef<bool()> CanActivateCallback)
 	{
-		const T PrevLevel = CurrentLevel;
+		const TModSize PrevLevel = CurrentLevel;
 		bool bStateChanged = false;
 
 		// Update state
@@ -445,139 +355,23 @@ struct PREDICTEDMOVEMENT_API FModifierStatics
 		if (bStateChanged)
 		{
 			// Determine the maximum level based on the available tags
-			const T MaxLevel = LevelTags.Num() > 0 ? static_cast<T>(LevelTags.Num() - 1) : 0;
+			const TModSize MaxLevel = LevelTags.Num() > 0 ? static_cast<TModSize>(LevelTags.Num() - 1) : 0;
 
 			// Update the modifier levels based on the method
-			const T LocalLevel      = Local		 ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Local->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
-			const T CorrectionLevel = Correction ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Correction->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
-			const T ServerLevel     = Server	 ? FModifierStatics::UpdateModifierLevel<T, TEnum>(Method, Server->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
+			const TModSize LocalLevel      = Local		? UpdateModifierLevel(Method, Local->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
+			const TModSize CorrectionLevel = Correction ? UpdateModifierLevel(Method, Correction->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
+			const TModSize ServerLevel     = Server		? UpdateModifierLevel(Method, Server->Data.Modifiers, MaxLevel, InvalidLevel) : InvalidLevel;
 
 			// Combine the levels into a single current level
-			TArray<T> Levels;
+			TArray<TModSize> Levels;
 			if (LocalLevel != InvalidLevel)      { Levels.Add(LocalLevel); }
 			if (CorrectionLevel != InvalidLevel) { Levels.Add(CorrectionLevel); }
 			if (ServerLevel != InvalidLevel)     { Levels.Add(ServerLevel); }
 
-			CurrentLevel = Levels.Num() > 0 ? FModifierStatics::CombineModifierLevels<T>(Method, Levels, MaxLevel, InvalidLevel) : InvalidLevel;
+			CurrentLevel = Levels.Num() > 0 ? CombineModifierLevels(Method, Levels, MaxLevel, InvalidLevel) : InvalidLevel;
 			return CurrentLevel != PrevLevel;
 		}
 
 		return false;
-	}
-	
-	static int32 GetBitPosition(uint32 Value)
-	{
-		if (Value == 0) return -1;
-		return FMath::FloorLog2(Value);
-	}
-	
-	template <typename T, typename TEnum>
-	static T UpdateModifierLevel(EModifierLevelMethod Method, const TArray<TEnum>& Modifiers, uint8 MaxLevel, T InvalidLevel)
-	{
-		static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-			"UpdateModifierLevel only supports uint8, uint16, or uint32 as T.");
-
-		static_assert(TIsValidModifierEnum<TEnum>::value,
-			"UpdateModifierLevel only supports EModifierByte, EModifierShort, or EModifierLong as TEnum.");
-
-		using Underlying = std::underlying_type_t<TEnum>;
-
-		if (Modifiers.IsEmpty())
-		{
-			return InvalidLevel;
-		}
-		
-		T NewLevel = 0;
-
-		switch (Method)
-		{
-		case EModifierLevelMethod::Max:
-			if (!Modifiers.IsEmpty())
-			{
-				auto MaxEnum = *Algo::MaxElement(Modifiers);
-				NewLevel = static_cast<T>(GetBitPosition(static_cast<Underlying>(MaxEnum)));
-			}
-			break;
-
-		case EModifierLevelMethod::Min:
-			if (!Modifiers.IsEmpty())
-			{
-				auto MinEnum = *Algo::MinElement(Modifiers);
-				NewLevel = static_cast<T>(GetBitPosition(static_cast<Underlying>(MinEnum)));
-			}
-			break;
-
-		case EModifierLevelMethod::Stack:
-			for (const TEnum& Level : Modifiers)
-			{
-				NewLevel += GetBitPosition(static_cast<Underlying>(Level));
-			}
-			break;
-
-		case EModifierLevelMethod::Average:
-			if (!Modifiers.IsEmpty())
-			{
-				Underlying Total = 0;
-				for (const TEnum& Level : Modifiers)
-				{
-					Total += GetBitPosition(static_cast<Underlying>(Level));
-				}
-				NewLevel = static_cast<T>(Total / Modifiers.Num());
-			}
-			break;
-		}
-
-		// Don't exceed the maximum level
-		NewLevel = FMath::Min(NewLevel, MaxLevel);
-		
-		return NewLevel;
-	}
-
-	template <typename T>
-	static T CombineModifierLevels(EModifierLevelMethod Method, const TArray<T>& ModifierLevels, uint8 MaxLevel, T InvalidLevel)
-	{
-		static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
-			"CombineModifierLevels only supports uint8, uint16, or uint32 as T.");
-
-		if (ModifierLevels.IsEmpty())
-		{
-			return InvalidLevel;
-		}
-
-		T NewLevel = 0;
-
-		switch (Method)
-		{
-		case EModifierLevelMethod::Max:
-			NewLevel = *Algo::MaxElement(ModifierLevels);
-			break;
-
-		case EModifierLevelMethod::Min:
-			NewLevel = *Algo::MinElement(ModifierLevels);
-			break;
-
-		case EModifierLevelMethod::Stack:
-			for (const T& Level : ModifierLevels)
-			{
-				NewLevel += Level;
-			}
-			break;
-
-		case EModifierLevelMethod::Average:
-			{
-				uint64 Total = 0; // Prevent overflow
-				for (const T& Level : ModifierLevels)
-				{
-					Total += Level;
-				}
-				NewLevel = static_cast<T>(Total / ModifierLevels.Num());
-			}
-			break;
-		}
-
-		// Don't exceed the maximum level
-		NewLevel = FMath::Min(NewLevel, MaxLevel);
-		
-		return NewLevel;
 	}
 };

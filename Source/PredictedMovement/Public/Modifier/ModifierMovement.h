@@ -7,32 +7,23 @@
 #include "ModifierImpl.h"
 #include "ModifierTypes.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Modifier/ModifierCompression.h"
 #include "System/PredictedMovementVersioning.h"
 #include "ModifierMovement.generated.h"
 
 class AModifierCharacter;
 
-using Mod_Local_Byte = FMovementModifier_LocalPredicted<uint8, EModifierByte>;
-using Mod_Local_Short = FMovementModifier_LocalPredicted<uint16, EModifierShort>;
-using Mod_Local_Long = FMovementModifier_LocalPredicted<uint32, EModifierLong>;
-
-using Mod_LocalCorrection_Byte = FMovementModifier_LocalPredicted_WithCorrection<uint8, EModifierByte>;
-using Mod_LocalCorrection_Short = FMovementModifier_LocalPredicted_WithCorrection<uint16, EModifierShort>;
-using Mod_LocalCorrection_Long = FMovementModifier_LocalPredicted_WithCorrection<uint32, EModifierLong>;
-
-using Mod_Server_Byte = FMovementModifier_ServerInitiated<uint8, EModifierByte>;
-using Mod_Server_Short = FMovementModifier_ServerInitiated<uint16, EModifierShort>;
-using Mod_Server_Long = FMovementModifier_ServerInitiated<uint32, EModifierLong>;
+using TMod_Local = FMovementModifier_LocalPredicted;
+using TMod_LocalCorrection = FMovementModifier_LocalPredicted_WithCorrection;
+using TMod_Server = FMovementModifier_ServerInitiated;
 
 
 struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMoveResponseDataContainer
 {  // Server ➜ Client
 	using Super = FCharacterMoveResponseDataContainer;
 
-	FModifierMoveResponse<uint8, EModifierByte> BoostCorrection;
-	FModifierMoveResponse<uint8, EModifierByte> BoostServer;
-	FModifierMoveResponse<uint8, EModifierByte> SnareServer;
+	FModifierMoveResponse BoostCorrection;
+	FModifierMoveResponse BoostServer;
+	FModifierMoveResponse SnareServer;
 
 	virtual void ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement, const FClientAdjustment& PendingAdjustment) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap) override;
@@ -46,10 +37,10 @@ public:
 	FModifierNetworkMoveData()
 	{}
 
-	FModifierMoveData_LocalPredicted<uint8> BoostLocal;
-	FModifierMoveData_WithCorrection<uint8> BoostCorrection;
-	FModifierMoveData_ServerInitiated<uint8> BoostServer;
-	FModifierMoveData_ServerInitiated<uint8> SnareServer;
+	FModifierMoveData_LocalPredicted BoostLocal;
+	FModifierMoveData_WithCorrection BoostCorrection;
+	FModifierMoveData_ServerInitiated BoostServer;
+	FModifierMoveData_ServerInitiated SnareServer;
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -102,9 +93,9 @@ public:
 	EModifierLevelMethod BoostLevelMethod;
 	
 	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
-	Mod_Local_Byte BoostLocal;
-	Mod_LocalCorrection_Byte BoostCorrection;
-	Mod_Server_Byte BoostServer;
+	TMod_Local BoostLocal;
+	TMod_LocalCorrection BoostCorrection;
+	TMod_Server BoostServer;
 
 public:
 	/**
@@ -124,7 +115,7 @@ public:
 	EModifierLevelMethod SnareLevelMethod;
 	
 	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
-	FMovementModifier_ServerInitiated<uint8, EModifierByte> SnareServer;
+	TMod_Server SnareServer;
 	
 public:
 	UModifierMovement(const FObjectInitializer& ObjectInitializer);
@@ -133,10 +124,6 @@ public:
 	virtual void PostLoad() override;
 	virtual void SetUpdatedComponent(USceneComponent* NewUpdatedComponent) override;
 
-#if WITH_EDITOR
-	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
-#endif
-	
 public:
 	virtual float GetMaxAcceleration() const override;
 	virtual float GetMaxSpeed() const override;
@@ -232,11 +219,11 @@ public:
 	virtual ~FSavedMove_Character_Modifier() override
 	{}
 
-	FModifierSavedMove<uint8, EModifierByte> BoostLocal;
-	FModifierSavedMove_WithCorrection<uint8, EModifierByte> BoostCorrection;
-	FModifierSavedMove_ServerInitiated<uint8, EModifierByte> BoostServer;
+	FModifierSavedMove BoostLocal;
+	FModifierSavedMove_WithCorrection BoostCorrection;
+	FModifierSavedMove_ServerInitiated BoostServer;
 	
-	FModifierSavedMove_ServerInitiated<uint8, EModifierByte> SnareServer;
+	FModifierSavedMove_ServerInitiated SnareServer;
 	
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;

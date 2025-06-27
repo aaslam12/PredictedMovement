@@ -70,19 +70,25 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 {  // Client ➜ Server
 	Super::Serialize(CharacterMovement, Ar, PackageMap, MoveType);
 
+	BoostLocal.Serialize(Ar, TEXT("BoostLocal"));
+	BoostCorrection.Serialize(Ar, TEXT("BoostCorrection"));
+	BoostServer.Serialize(Ar, TEXT("BoostServer"));
+
+	SnareServer.Serialize(Ar, TEXT("SnareServer"));
+	
+	// Ar << BoostLocal.WantsModifiers;
+	// Ar << BoostCorrection.WantsModifiers;
+	// Ar << BoostCorrection.Modifiers;
+	// Ar << BoostServer.Modifiers;
+	
+	// Ar << SnareServer.Modifiers;
+	
 	// constexpr uint8 MaxModifiers = 8;
 	// if (MaxModifiers <= 1)
 	// {
 	// 	return !Ar.IsError();
 	// }
 
-	Ar << BoostLocal.WantsModifiers;
-	Ar << BoostCorrection.WantsModifiers;
-	Ar << BoostCorrection.Modifiers;
-	Ar << BoostServer.Modifiers;
-	
-	Ar << SnareServer.Modifiers;
-	
 	// Ar << WantsModifiers;
 	// Ar << Modifiers;
 	
@@ -144,31 +150,6 @@ void UModifierMovement::SetUpdatedComponent(USceneComponent* NewUpdatedComponent
 
 	ModifierCharacterOwner = Cast<AModifierCharacter>(PawnOwner);
 }
-
-#if WITH_EDITOR
-EDataValidationResult UModifierMovement::IsDataValid(class FDataValidationContext& Context) const
-{
-	const int32 MaxBoostLevels = FMath::Min3(BoostLocal.BitSize, BoostCorrection.BitSize, BoostServer.BitSize);
-	if (Boost.Num() > MaxBoostLevels)
-	{
-		Context.AddError(FText::Format(
-			NSLOCTEXT("ModifierMovement", "BoostLevelsTooMany", "ModifierMovement {0} has {1} Boost Levels. Max is {2}."),
-			FText::FromString(GetName()), Boost.Num(), MaxBoostLevels));
-		return EDataValidationResult::Invalid;
-	}
-
-	const int32 MaxSnareLevels = SnareServer.BitSize;
-	if (Snare.Num() > MaxSnareLevels)
-	{
-		Context.AddError(FText::Format(
-			NSLOCTEXT("ModifierMovement", "SnareLevelsTooMany", "ModifierMovement {0} has {1} Snare Levels. Max is {2}."),
-			FText::FromString(GetName()), Snare.Num(), MaxSnareLevels));
-		return EDataValidationResult::Invalid;
-	}
-	
-	return Super::IsDataValid(Context);
-}
-#endif
 
 float UModifierMovement::GetMaxAcceleration() const
 {
@@ -250,7 +231,7 @@ void UModifierMovement::UpdateModifierMovementState()
 		{	// Boost
 			const FGameplayTag PrevBoostLevel = GetBoostLevel();
 			const uint8 PrevBoostLevelValue = BoostLevel;
-			if (FModifierStatics::ProcessModifiers<uint8, EModifierByte, Mod_Local_Byte, Mod_LocalCorrection_Byte, Mod_Server_Byte>(
+			if (FModifierStatics::ProcessModifiers<TMod_Local, TMod_LocalCorrection, TMod_Server>(
 				BoostLevel, BoostLevelMethod, BoostLevels, UINT8_MAX,
 				&BoostLocal, &BoostCorrection, &BoostServer,
 				[this]() { return CanBoostInCurrentState(); }))
@@ -264,7 +245,7 @@ void UModifierMovement::UpdateModifierMovementState()
 		{	// Snare
 			const FGameplayTag PrevSnareLevel = GetSnareLevel();
 			const uint8 PrevSnareLevelValue = SnareLevel;
-			if (FModifierStatics::ProcessModifiers<uint8, EModifierByte, Mod_Local_Byte, Mod_LocalCorrection_Byte, Mod_Server_Byte>(
+			if (FModifierStatics::ProcessModifiers<TMod_Local, TMod_LocalCorrection, TMod_Server>(
 				SnareLevel, SnareLevelMethod, SnareLevels, UINT8_MAX,
 				nullptr, nullptr, &SnareServer,
 				[this]() { return CanSnareInCurrentState(); }))
