@@ -116,6 +116,17 @@ public:
 	
 	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
 	TMod_Server SnareServer;
+
+public:
+	/** Client auth parameters mapped to a source gameplay tag */
+	UPROPERTY(Category="Character Movement (Networking)", EditAnywhere, BlueprintReadOnly)
+	TMap<FGameplayTag, FClientAuthParams> ClientAuthParams;
+
+	UPROPERTY()
+	FClientAuthStack ClientAuthStack;
+
+	UPROPERTY()
+	uint64 ClientAuthIdCounter = 0;
 	
 public:
 	UModifierMovement(const FObjectInitializer& ObjectInitializer);
@@ -170,7 +181,7 @@ public:
 	bool SnareAffectsRootMotion() const { return GetSnareParams() ? GetSnareParams()->bAffectsRootMotion : false; }
 	
 	/* ~Snare Implementation */
-	
+
 public:
 	void UpdateModifierMovementState();
 
@@ -178,12 +189,46 @@ public:
 	virtual void UpdateCharacterStateAfterMovement(float DeltaSeconds) override;
 	
 public:
+	/* Client Auth Implementation */
+	
+	virtual FClientAuthData* GetClientAuthData();
+	FClientAuthParams* GetClientAuthParamsForSource(const FGameplayTag& Source) { return ClientAuthParams.Find(Source); }
+	virtual FClientAuthParams GetClientAuthParams(const FClientAuthData* ClientAuthData);
+
+protected:
+	/**
+	 * Called when the client's position is rejected by the server entirely due to excessive difference
+	 * @param ClientLoc The client's location
+	 * @param ServerLoc The server's location
+	 * @param LocDiff The difference between the client and server locations
+	 */
+	virtual void OnClientAuthRejected(const FVector& ClientLoc, const FVector& ServerLoc, const FVector& LocDiff) {}
+
+public:
+	/** 
+	 * Grant the client position authority, based on the current state of the character.
+	 * @param ClientAuthSource What the client is requesting authority for, not used by default, requires override
+	 * @param OverrideDuration Override the default client authority time, -1.f to use default
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Character Movement (Networking)")
+	virtual void GrantClientAuthority(FGameplayTag ClientAuthSource, float OverrideDuration = -1.f);
+
+protected:
+	virtual bool ServerShouldGrantClientPositionAuthority(FVector& ClientLoc);
+	
+	/* ~Client Auth Implementation */
+	
+public:
 	virtual void ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData) override;
 	
 	virtual bool ServerCheckClientError(float ClientTimeStamp, float DeltaTime, const FVector& Accel,
 		const FVector& ClientWorldLocation, const FVector& RelativeClientLocation,
 		UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode) override;
-	
+
+	virtual void ServerMoveHandleClientError(float ClientTimeStamp, float DeltaTime, const FVector& Accel,
+		const FVector& RelativeClientLocation, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName,
+		uint8 ClientMovementMode) override;
+
 	virtual void OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData, float TimeStamp,
 		FVector NewLocation, FVector NewVelocity, UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase,
 		bool bBaseRelativePosition, uint8 ServerMovementMode

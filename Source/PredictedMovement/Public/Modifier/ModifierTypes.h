@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "ModifierTypes.generated.h"
 
 
@@ -151,5 +152,248 @@ struct PREDICTEDMOVEMENT_API FFallingModifierParams
 	float GetAirControl(float CurrentAirControl) const
 	{
 		return bOverrideAirControl ? AirControlOverride : AirControlScalar * CurrentAirControl;
+	}
+};
+
+USTRUCT(BlueprintType)
+struct PREDICTEDMOVEMENT_API FClientAuthParams
+{
+	GENERATED_BODY()
+
+	FClientAuthParams()
+		: bEnableClientAuth(true)
+		, ClientAuthTime(1.2f)
+		, MaxClientAuthDistance(150.f)
+		, RejectClientAuthDistance(900.f)
+		, Priority(99)
+	{}
+	
+	FClientAuthParams(int32 InPriority)
+		: bEnableClientAuth(true)
+		, ClientAuthTime(1.2f)
+		, MaxClientAuthDistance(150.f)
+		, RejectClientAuthDistance(900.f)
+		, Priority(InPriority)
+	{}
+
+	FClientAuthParams(bool bInEnableClientAuth, float InClientAuthTime, float InMaxClientAuthDistance, float InRejectClientAuthDistance, int32 InPriority)
+		: bEnableClientAuth(bInEnableClientAuth)
+		, ClientAuthTime(InClientAuthTime)
+		, MaxClientAuthDistance(InMaxClientAuthDistance)
+		, RejectClientAuthDistance(InRejectClientAuthDistance)
+		, Priority(InPriority)
+	{}
+	
+	/**
+	 * If True, the client will be allowed to send position updates to the server
+	 * Useful for short bursts of movement that are difficult to sync over the network
+	 */
+	UPROPERTY(Category="Character Movement (Networking)", EditAnywhere, BlueprintReadOnly)
+	bool bEnableClientAuth;
+	
+	/**
+	 * How long to allow client to have positional authority after being Snared
+	 */
+	UPROPERTY(Category="Character Movement (Networking)", EditAnywhere, BlueprintReadOnly, meta=(ClampMin="0", UIMin="0", ForceUnits="s", EditCondition="bEnableClientAuth", EditConditionHides))
+	float ClientAuthTime;
+
+	/**
+	 * Maximum distance between client and server that will be accepted by server
+	 * Values above this will be scaled to the maximum distance
+	 */
+	UPROPERTY(Category="Character Movement (Networking)", EditAnywhere, BlueprintReadOnly, meta=(ClampMin="0", UIMin="0", ForceUnits="cm", EditCondition="bEnableClientAuth", EditConditionHides))
+	float MaxClientAuthDistance;
+
+	/**
+	 * Maximum distance between client and server that will be accepted by server
+	 * Values above this will be rejected entirely, on suspicion of cheating, or excessive error
+	 */
+	UPROPERTY(Category="Character Movement (Networking)", EditAnywhere, BlueprintReadOnly, meta=(ClampMin="0", UIMin="0", ForceUnits="cm", EditCondition="bEnableClientAuth", EditConditionHides))
+	float RejectClientAuthDistance;
+
+	/**
+	 * Optional property that can be used for GetClientAuthData() to determine priority
+	 */
+	UPROPERTY(Category="Character Movement (Networking)", EditAnywhere, BlueprintReadOnly, meta=(ClampMin="0", UIMin="0", EditCondition="bEnableClientAuth", EditConditionHides))
+	int32 Priority;
+};
+
+/**
+ * Client auth data for providing client with positional authority
+ */
+USTRUCT()
+struct PREDICTEDMOVEMENT_API FClientAuthData
+{
+	GENERATED_BODY()
+
+	FClientAuthData()
+		: Alpha(0.f)
+		, TimeRemaining(0.f)
+		, Id(0)
+		, Source(FGameplayTag::EmptyTag)
+		, Priority(99)
+	{}
+
+	FClientAuthData(const FGameplayTag& InSource, float InTimeRemaining, int32 InPriority, uint64 InId)
+		: Alpha(0.f)
+		, TimeRemaining(InTimeRemaining)
+		, Id(InId)
+		, Source(InSource)
+		, Priority(InPriority)
+	{}
+
+	FClientAuthData(const FGameplayTag& InSource, float InTimeRemaining, float InAlpha, int32 InPriority, uint64 InId)
+		: Alpha(InAlpha)
+		, TimeRemaining(InTimeRemaining)
+		, Id(InId)
+		, Source(InSource)
+		, Priority(InPriority)
+	{}
+
+	UPROPERTY()
+	float Alpha;
+	
+	UPROPERTY()
+	float TimeRemaining;
+
+	UPROPERTY()
+	uint64 Id;
+	
+	UPROPERTY()
+	FGameplayTag Source;
+	
+	UPROPERTY()
+	int32 Priority;
+
+	bool IsValid() const
+	{
+		return Id != 0 && Source.IsValid();
+	}
+
+	bool operator==(const FClientAuthData& Other) const
+	{
+		return IsValid() && Id == Other.Id;
+	}
+
+	bool operator!=(const FClientAuthData& Other) const
+	{
+		return !(*this == Other);
+	}
+};
+
+/**
+ * Stack of client auth data for providing client with positional authority
+ */
+USTRUCT()
+struct PREDICTEDMOVEMENT_API FClientAuthStack
+{
+	GENERATED_BODY()
+
+	FClientAuthStack()
+	{}
+
+	UPROPERTY()
+	TArray<FClientAuthData> Stack;
+
+	bool operator==(const FClientAuthStack& Other) const
+	{
+		return Stack == Other.Stack;
+	}
+
+	bool operator!=(const FClientAuthStack& Other) const
+	{
+		return !(*this == Other);
+	}
+
+	void SortByPriority()
+	{
+		Stack.Sort([](const FClientAuthData& A, const FClientAuthData& B)
+		{
+			return A.Priority < B.Priority;
+		});
+	}
+
+	TArray<FClientAuthData> FilterPriority(int32 Priority) const
+	{
+		return Stack.FilterByPredicate([Priority](const FClientAuthData& AuthData)
+		{
+			return AuthData.Priority == Priority;
+		});
+	}
+
+	int32 DetermineLowestPriority()
+	{
+		if (Stack.Num() == 0)
+		{
+			return INT32_MAX;
+		}
+		SortByPriority();
+		return Stack[0].Priority;
+	}
+
+	TArray<FClientAuthData> GetLowestPriority()
+	{
+		return FilterPriority(DetermineLowestPriority());
+	}
+
+	FClientAuthData* GetFirst()
+	{
+		return Stack.Num() > 0 ? &Stack[0] : nullptr;
+	}
+
+	const FClientAuthData* GetFirst() const
+	{
+		return Stack.Num() > 0 ? &Stack[0] : nullptr;
+	}
+
+	FClientAuthData* GetLatest()
+	{
+		return Stack.Num() > 0 ? &Stack.Last() : nullptr;
+	}
+
+	void RemoveFirst()
+	{
+		if (Stack.Num() > 0)
+		{
+			Stack.RemoveAt(0);
+		}
+	}
+	
+	const FClientAuthData* GetLatest() const
+	{
+		return Stack.Num() > 0 ? &Stack.Last() : nullptr;
+	}
+
+	void RemoveLatest()
+	{
+		if (Stack.Num() > 0)
+		{
+			Stack.RemoveAt(Stack.Num() - 1);
+		}
+	}
+
+	void RemoveData(const FClientAuthData* Data)
+	{
+		if (Data)
+		{
+			Stack.Remove(*Data);
+		}
+	}
+
+	void RemoveAllDataForSource(const FGameplayTag& Source)
+	{
+		Stack.RemoveAll([Source](const FClientAuthData& Data)
+		{
+			return Data.Source == Source;
+		});
+	}
+
+	void Update(float DeltaTime)
+	{
+		Stack.RemoveAll([DeltaTime](FClientAuthData& Data)
+		{
+			Data.TimeRemaining -= DeltaTime;
+			return Data.TimeRemaining <= 0.f;
+		});
 	}
 };

@@ -12,6 +12,34 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModifierMovement)
 
+namespace ModifierMovementCVars
+{
+#if !UE_BUILD_SHIPPING
+	static bool bClientAuthDisabled = false;
+	FAutoConsoleVariableRef CVarClientAuthDisabled(
+		TEXT("p.ClientAuth.Disabled"),
+		bClientAuthDisabled,
+		TEXT("Override client authority to disabled.\n")
+		TEXT("If true, disable client authority"),
+		ECVF_Default);
+#endif
+}
+
+UModifierMovement::UModifierMovement(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	SetNetworkMoveDataContainer(ModifierMoveDataContainer);
+	SetMoveResponseDataContainer(ModifierMoveResponseDataContainer);
+
+	// Init Modifier Levels
+	Boost.Add(FModifierTags::Modifier_Boost, { 1.50f });  // 50% Speed Boost
+	Snare.Add(FModifierTags::Modifier_Snare, { 0.50f });  // 50% Speed Snare
+
+	// Auth params for Snare
+	static constexpr int32 DefaultPriority = 5;
+	ClientAuthParams.FindOrAdd(FModifierTags::ClientAuth_Snare, { DefaultPriority });
+}
+
 void FModifierMoveResponseDataContainer::ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement,
 	const FClientAdjustment& PendingAdjustment)
 {
@@ -119,17 +147,6 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 	// }
 
 	return !Ar.IsError();
-}
-
-UModifierMovement::UModifierMovement(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
-{
-	SetNetworkMoveDataContainer(ModifierMoveDataContainer);
-	SetMoveResponseDataContainer(ModifierMoveResponseDataContainer);
-
-	// Init Modifier Levels
-	Boost.Add(FModifierTags::Modifier_Boost, { 1.50f });  // 50% Speed Boost
-	Snare.Add(FModifierTags::Modifier_Snare, { 0.50f });  // 50% Speed Snare
 }
 
 bool UModifierMovement::HasValidData() const
@@ -272,6 +289,162 @@ void UModifierMovement::UpdateCharacterStateAfterMovement(float DeltaSeconds)
 	Super::UpdateCharacterStateAfterMovement(DeltaSeconds);
 }
 
+FClientAuthData* UModifierMovement::GetClientAuthData()
+{
+	ClientAuthStack.SortByPriority();
+	return ClientAuthStack.GetFirst();
+}
+
+FClientAuthParams UModifierMovement::GetClientAuthParams(const FClientAuthData* ClientAuthData)
+{
+	if (!ClientAuthData)
+	{
+		return {};
+	}
+	
+	FClientAuthParams Params = { false, 0.f, 0.f, 0.f, ClientAuthData->Priority };
+
+	// Get all active client auth data that matches the priority
+	TArray<FClientAuthData> Priority = ClientAuthStack.FilterPriority(ClientAuthData->Priority);
+
+	// Combine the parameters
+	int32 Num = 0;
+	for (const FClientAuthData& Data : Priority)
+	{
+		if (const FClientAuthParams* DataParams = GetClientAuthParamsForSource(Data.Source))
+		{
+			Params.ClientAuthTime += DataParams->ClientAuthTime;
+			Params.MaxClientAuthDistance += DataParams->MaxClientAuthDistance;
+			Params.RejectClientAuthDistance += DataParams->RejectClientAuthDistance;
+			Num++;
+		}
+	}
+
+	// Average the parameters
+	Params.bEnableClientAuth = Num > 0;
+	if (Num > 1)
+	{
+		Params.ClientAuthTime /= Num;
+		Params.MaxClientAuthDistance /= Num;
+		Params.RejectClientAuthDistance /= Num;
+	}
+
+	return Params;
+}
+
+void UModifierMovement::GrantClientAuthority(FGameplayTag ClientAuthSource, float OverrideDuration)
+{
+	if (!CharacterOwner || !CharacterOwner->HasAuthority())
+	{
+		return;
+	}
+	
+	if (const FClientAuthParams* Params = GetClientAuthParamsForSource(ClientAuthSource))
+	{
+		if (Params->bEnableClientAuth)
+		{
+			const float Duration = OverrideDuration > 0.f ? OverrideDuration : Params->ClientAuthTime;
+			ClientAuthStack.Stack.Add(FClientAuthData(ClientAuthSource, Duration, Params->Priority, ++ClientAuthIdCounter));
+
+			// Limit the number of auth data entries
+			// IMPORTANT: We do not allow serializing more than 8, if this changes, update the serialization code too
+			if (ClientAuthStack.Stack.Num() > 8)
+			{
+				ClientAuthStack.Stack.RemoveAt(0);
+			}
+		}
+	}
+	else
+	{
+#if !UE_BUILD_SHIPPING
+		FMessageLog("PIE").Error(FText::FromString(FString::Printf(TEXT("ClientAuthSource '%s' not found in ClientAuthParams"), *ClientAuthSource.ToString())));
+#else
+		UE_LOG(LogModifierMovement, Error, TEXT("ClientAuthSource '%s' not found"), *ClientAuthSource.ToString());
+#endif
+	}
+}
+
+bool UModifierMovement::ServerShouldGrantClientPositionAuthority(FVector& ClientLoc)
+{
+	// Already ignoring client movement error checks and correction
+	if (bIgnoreClientMovementErrorChecksAndCorrection)
+	{
+		return false;
+	}
+
+	// Abort if client authority is not enabled
+#if !UE_BUILD_SHIPPING
+	if (ModifierMovementCVars::bClientAuthDisabled)
+	{
+		return false;
+	}
+#endif
+
+	// Get auth data
+	FClientAuthData* ClientAuthData = GetClientAuthData();
+	if (!ClientAuthData || !ClientAuthData->IsValid())
+	{
+		// No auth data, can't do anything
+		return false;
+	}
+
+	// Get auth params
+	const FClientAuthParams Params = GetClientAuthParams(ClientAuthData);
+
+	// Disabled
+	if (!Params.bEnableClientAuth)
+	{
+		return false;
+	}
+
+	// Validate auth data
+#if !UE_BUILD_SHIPPING
+	if (UNLIKELY(ClientAuthData->TimeRemaining <= 0.f))
+	{
+		// ServerMoveHandleClientError() should have removed the auth data already
+		return ensure(false);
+	}
+#endif
+	
+	// Reset alpha, we're going to calculate it now
+	ClientAuthData->Alpha = 0.f;
+
+	// How far the client is from the server
+	const FVector ServerLoc = UpdatedComponent->GetComponentLocation();
+	FVector LocDiff = ServerLoc - ClientLoc;
+
+	// No change or almost no change occurred
+	if (LocDiff.IsNearlyZero())
+	{
+		// Grant full authority
+		ClientAuthData->Alpha = 1.f;
+		return true;
+	}
+
+	// If the client is too far away from the server, reject the client position entirely, potential cheater
+	if (LocDiff.SizeSquared() >= FMath::Square(Params.RejectClientAuthDistance))
+	{
+		OnClientAuthRejected(ClientLoc, ServerLoc, LocDiff);
+		return false;
+	}
+
+	// If the client is not within the maximum allowable distance, accept the client position, but only partially
+	if (LocDiff.Size() >= Params.MaxClientAuthDistance)
+	{
+		// Accept only a portion of the client's location
+		ClientAuthData->Alpha = Params.MaxClientAuthDistance / LocDiff.Size();
+		ClientLoc = FMath::Lerp<FVector>(ServerLoc, ClientLoc, ClientAuthData->Alpha);
+		LocDiff = ServerLoc - ClientLoc;
+	}
+	else
+	{
+		// Accept full client location
+		ClientAuthData->Alpha = 1.f;
+	}
+
+	return true;
+}
+
 void UModifierMovement::ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData)
 {
 	// Server updates from the client's move data
@@ -323,6 +496,39 @@ bool UModifierMovement::ServerCheckClientError(float ClientTimeStamp, float Delt
 	}
 
 	return false;
+}
+
+void UModifierMovement::ServerMoveHandleClientError(float ClientTimeStamp, float DeltaTime, const FVector& Accel,
+	const FVector& RelativeClientLocation, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName,
+	uint8 ClientMovementMode)
+{
+	// This is the entry-point for determining how to handle client corrections; we can determine they are out of sync
+	// and make any changes that suit our needs
+	
+	// Client >> TickComponent ➜ ControlledCharacterMove ➜ CallServerMove ➜ ReplicateMoveToServer >> Server
+	// >> ServerMove ➜ ServerMoveHandleClientError
+
+	// Initialize client authority when the client is about to receive a correction that applies Snare
+#if !UE_BUILD_SHIPPING
+	if (!ModifierMovementCVars::bClientAuthDisabled)
+#endif
+	{
+		// Update client authority time remaining
+		ClientAuthStack.Update(DeltaTime);
+
+		// Apply these thresholds to control client authority
+		FVector ClientLoc = FRepMovement::RebaseOntoZeroOrigin(RelativeClientLocation, this);
+		if (ServerShouldGrantClientPositionAuthority(ClientLoc))
+		{
+			// Apply client authoritative position directly -- Subsequent moves will resolve overlapping conditions
+			UpdatedComponent->SetWorldLocation(ClientLoc, false);
+		}
+	}
+
+	// The move prepared here will finally be sent in the next ReplicateMoveToServer()
+	
+	Super::ServerMoveHandleClientError(ClientTimeStamp, DeltaTime, Accel, RelativeClientLocation, ClientMovementBase,
+		ClientBaseBoneName, ClientMovementMode);
 }
 
 void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData,
