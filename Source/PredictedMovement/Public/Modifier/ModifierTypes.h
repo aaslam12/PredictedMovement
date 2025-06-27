@@ -1,12 +1,10 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Copyright (c) Jared Taylor
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "ModifierCompression.h"
 
-
-// DECLARE_DELEGATE_ThreeParams(FOnModifierChanged, FGameplayTag /*ModifierType*/, T /*ModifierLevel*/, T /*PrevLevel*/);
 
 template <typename T>
 struct TIsValidModifierEnum : std::false_type {};
