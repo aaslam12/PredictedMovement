@@ -167,7 +167,7 @@ struct PREDICTEDMOVEMENT_API FModifierMoveData
 	
 	T WantsModifiers;
 
-	virtual void ClientFillNetworkMoveData(uint8 InWantsModifiers, uint8 InModifiers)
+	virtual void ClientFillNetworkMoveData(T InWantsModifiers, T InModifiers)
 	{
 		WantsModifiers = InWantsModifiers;
 	}
@@ -191,7 +191,7 @@ struct PREDICTEDMOVEMENT_API FModifierMoveData_WithCorrection final : FModifierM
 	
 	T Modifiers;
 
-	virtual void ClientFillNetworkMoveData(uint8 InWantsModifiers, uint8 InModifiers) override
+	virtual void ClientFillNetworkMoveData(T InWantsModifiers, T InModifiers) override
 	{
 		Super::ClientFillNetworkMoveData(InWantsModifiers, InModifiers);
 		Modifiers = InModifiers;
@@ -213,7 +213,7 @@ struct PREDICTEDMOVEMENT_API FModifierMoveData_ServerInitiated
 	
 	T Modifiers;
 
-	void ClientFillNetworkMoveData(uint8 InModifiers)
+	void ClientFillNetworkMoveData(T InModifiers)
 	{
 		Modifiers = InModifiers;
 	}
@@ -319,8 +319,8 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated
 {
 	FMovementModifierData<EModifierByte> Data;
 
-	uint8 GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
-	uint8 GetModifierLevel() const { return Data.Modifiers.Num(); }
+	T GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
+	T GetModifierLevel() const { return Data.Modifiers.Num(); }
 
 	void AddModifier(T InLevel)
 	{
@@ -359,8 +359,6 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated
 		Data.WantsModifiers = FModifierCompression::SetModifiersFromBitmask<TEnum>(Modifiers);
 	}
 };
-
-// @TODO short and long versions
 
 /**
  * Represents a single modifier that can be applied to a character
