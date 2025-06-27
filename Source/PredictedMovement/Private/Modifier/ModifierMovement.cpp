@@ -54,6 +54,7 @@ void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Charac
 	// ➜ MoveAutonomous (UpdateFromCompressedFlags)
 	
 	const FSavedMove_Character_Modifier& SavedMove = static_cast<const FSavedMove_Character_Modifier&>(ClientMove);
+	BoostLocal.ClientFillNetworkMoveData(SavedMove.BoostLocal.WantsModifiers);
 	BoostCorrection.ClientFillNetworkMoveData(SavedMove.BoostCorrection.WantsModifiers, SavedMove.BoostCorrection.Modifiers);
 	BoostServer.ClientFillNetworkMoveData(SavedMove.BoostServer.Modifiers);
 	// WantsModifiers = SavedMove.WantsModifiers;
@@ -71,6 +72,7 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 	// 	return !Ar.IsError();
 	// }
 
+	Ar << BoostLocal.WantsModifiers;
 	Ar << BoostCorrection.WantsModifiers;
 	Ar << BoostCorrection.Modifiers;  // AUTH
 	Ar << BoostServer.Modifiers;  // AUTH
@@ -182,8 +184,9 @@ void UModifierMovement::UpdateModifierMovementState()
 		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
 
 		const uint8 PrevBoost = GetBoostLevel();
-		BoostCorrection.UpdateMovementState( CanBoostInCurrentState() );
-		BoostServer.UpdateMovementState( CanBoostInCurrentState() );
+		BoostLocal.UpdateMovementState(			CanBoostInCurrentState() );
+		BoostCorrection.UpdateMovementState(	CanBoostInCurrentState() );
+		BoostServer.UpdateMovementState(		CanBoostInCurrentState() );
 		if (GetBoostLevel() != PrevBoost)
 		{
 			// @TODO ModifierCharacterOwner->OnModifierChanged(ModifierType, GetBoostLevel(), PrevBoost);
@@ -222,6 +225,7 @@ void UModifierMovement::ServerMove_PerformMovement(const FCharacterNetworkMoveDa
 	const FModifierNetworkMoveData& ModifierMoveData = static_cast<const FModifierNetworkMoveData&>(MoveData);
 
 	// WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(ModifierMoveData.WantsModifiers);
+	BoostLocal.ServerMove_PerformMovement(ModifierMoveData.BoostLocal.WantsModifiers);
 	BoostCorrection.ServerMove_PerformMovement(ModifierMoveData.BoostCorrection.WantsModifiers);
 
 	Super::ServerMove_PerformMovement(MoveData);
@@ -290,12 +294,14 @@ bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 {
 	// const TArray<EModifierByte> RealWantsModifiers = WantsModifiers;
 
+	const TArray RealBoostLocal = BoostLocal.Data.WantsModifiers;
 	const TArray RealBoostCorrection = BoostCorrection.Data.WantsModifiers;
 	
 	const bool bResult = Super::ClientUpdatePositionAfterServerUpdate();
 	
 	// WantsModifiers = RealWantsModifiers;
 
+	BoostLocal.Data.WantsModifiers = RealBoostLocal;
 	BoostCorrection.Data.WantsModifiers = RealBoostCorrection;
 
 	return bResult;
@@ -308,6 +314,7 @@ void FSavedMove_Character_Modifier::Clear()
 	// WantsModifiers = 0;
 	// Modifiers = 0;  // AUTH
 
+	BoostLocal.Clear();
 	BoostCorrection.Clear();
 	BoostServer.Clear();
 }
@@ -323,6 +330,7 @@ void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime,
 	{
 		// Bit pack the modifiers into a bitfield.
 		// WantsModifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->WantsModifiers);
+		BoostLocal.SetMoveFor(MoveComp->BoostLocal.Data.WantsModifiers);
 		BoostCorrection.SetMoveFor(MoveComp->BoostCorrection.Data.WantsModifiers);
 	}
 }
@@ -354,6 +362,7 @@ bool FSavedMove_Character_Modifier::CanCombineWith(const FSavedMovePtr& NewMove,
 	// 	return false;
 	// }
 
+	if (!BoostLocal.CanCombineWith(SavedMove->BoostLocal.WantsModifiers)) { return false; }
 	if (!BoostCorrection.CanCombineWith(SavedMove->BoostCorrection.WantsModifiers)) { return false; }
 	
 	return FSavedMove_Character::CanCombineWith(NewMove, InCharacter, MaxDelta);
@@ -369,6 +378,7 @@ void FSavedMove_Character_Modifier::SetInitialPosition(ACharacter* C)
 	// Retrieve the value from our CMC to revert the saved move value back to this.
 	if (const UModifierMovement* MoveComp = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement())
 	{
+		BoostLocal.SetInitialPosition(MoveComp->BoostLocal.Data.WantsModifiers);
 		BoostCorrection.SetInitialPosition(MoveComp->BoostCorrection.Data.WantsModifiers);
 		// WantsModifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->WantsModifiers);
 	}
@@ -383,6 +393,7 @@ void FSavedMove_Character_Modifier::CombineWith(const FSavedMove_Character* OldM
 
 	if (UModifierMovement* MoveComp = C ? Cast<UModifierMovement>(C->GetCharacterMovement()) : nullptr)
 	{
+		MoveComp->BoostLocal.CombineWith(SavedOldMove->BoostLocal.WantsModifiers);
 		MoveComp->BoostCorrection.CombineWith(SavedOldMove->BoostCorrection.WantsModifiers);
 		// MoveComp->WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(SavedOldMove->WantsModifiers);
 	}
@@ -408,6 +419,11 @@ bool FSavedMove_Character_Modifier::IsImportantMove(const FSavedMovePtr& LastAck
 	// {
 	// 	return true;
 	// }
+
+	if (BoostLocal.IsImportantMove(SavedMove->BoostLocal.WantsModifiers))
+	{
+		return true;
+	}
 
 	if (BoostCorrection.IsImportantMove(SavedMove->BoostCorrection.WantsModifiers))
 	{

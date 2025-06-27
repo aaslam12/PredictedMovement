@@ -27,7 +27,7 @@ void AModifierCharacter::OnModifierChanged(const FGameplayTag& ModifierType, uin
 	// Replicate to simulated proxies
 	if (HasAuthority())
 	{
-		if (ModifierType == FModifierTags::Modifier_Type_Boost)
+		if (ModifierType == FModifierTags::Modifier_Boost)
 		{
 			SimulatedBoost = ModifierLevel;
 			MARK_PROPERTY_DIRTY_FROM_NAME(ThisClass, SimulatedBoost, this);
@@ -77,30 +77,45 @@ void AModifierCharacter::OnRep_SimulatedBoost(uint8 PrevLevel)
 	}
 }
 
-void AModifierCharacter::AddModifier(uint8 InLevel, bool bClientSimulation)
+bool AModifierCharacter::Boost(uint8 Level, EModifierNetType NetType, bool bClientSimulation)
 {
-	if (ModifierMovement)
+	// @TODO gameplay tags for levels
+	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy)
 	{
-		ModifierMovement->BoostServer.AddModifier(InLevel);
-		// ModifierMovement->AddWantedModifier(InLevel);
+		switch (NetType)
+		{
+		case EModifierNetType::LocalPredicted:
+			return ModifierMovement->BoostLocal.AddModifier(Level);
+		case EModifierNetType::WithCorrection:
+			return ModifierMovement->BoostCorrection.AddModifier(Level);
+		case EModifierNetType::ServerInitiated:
+			if (HasAuthority())
+			{
+				return ModifierMovement->BoostServer.AddModifier(Level);
+			}
+		default: return false;
+		}
 	}
+	return false;
 }
 
-void AModifierCharacter::RemoveModifier(uint8 InLevel, bool bClientSimulation)
+bool AModifierCharacter::UnBoost(uint8 Level, EModifierNetType NetType, bool bClientSimulation)
 {
-	if (ModifierMovement)
+	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy)
 	{
-		ModifierMovement->BoostServer.RemoveModifier(InLevel);
-		// ModifierMovement->RemoveWantedModifier(InLevel);
+		switch (NetType)
+		{
+		case EModifierNetType::LocalPredicted:
+			return ModifierMovement->BoostLocal.RemoveModifier(Level);
+		case EModifierNetType::WithCorrection:
+			return ModifierMovement->BoostCorrection.RemoveModifier(Level);
+		case EModifierNetType::ServerInitiated:
+			if (HasAuthority())
+			{
+				return ModifierMovement->BoostServer.RemoveModifier(Level);
+			}
+		default: return false;
+		}
 	}
-}
-
-void AModifierCharacter::OnEndModifier()
-{
-	K2_OnEndModifier();
-}
-
-void AModifierCharacter::OnStartModifier()
-{
-	K2_OnStartModifier();
+	return false;
 }

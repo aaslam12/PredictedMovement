@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "ModifierTypes.h"
+#include "ModifierImpl.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Modifier/ModifierCompression.h"
 #include "System/PredictedMovementVersioning.h"
@@ -37,8 +37,9 @@ public:
 	// uint8 WantsModifiers;
 	// uint8 Modifiers;  // AUTH
 
+	FModifierMoveData_LocalPredicted<uint8> BoostLocal;
 	FModifierMoveData_WithCorrection<uint8> BoostCorrection;
-	FModifierMoveData_ServerInitiated<uint8> BoostServer;  // Server needs to compare between client and server to know whether to send a correction or not
+	FModifierMoveData_ServerInitiated<uint8> BoostServer;
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -84,7 +85,7 @@ public:
 
 public:
 	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
-	FMovementModifier_LocalPredicted<uint8, EModifierByte> Boost;
+	FMovementModifier_LocalPredicted<uint8, EModifierByte> BoostLocal;
 	FMovementModifier_LocalPredicted_WithCorrection<uint8, EModifierByte> BoostCorrection;
 	FMovementModifier_ServerInitiated<uint8, EModifierByte> BoostServer;
 	
@@ -106,7 +107,7 @@ public:
 public:
 	/* BOOST Implementation */
 
-	virtual uint8 GetBoostLevel() const { return BoostCorrection.GetModifierLevel() + BoostServer.GetModifierLevel(); }
+	virtual uint8 GetBoostLevel() const { return BoostLocal.GetModifierLevel() + BoostCorrection.GetModifierLevel() + BoostServer.GetModifierLevel(); }
 	virtual bool CanBoostInCurrentState() const;
 	
 	/* ~BOOST Implementation */
@@ -161,6 +162,7 @@ public:
 	// uint8 WantsModifiers;
 	// uint8 Modifiers;  // AUTH
 
+	FModifierSavedMove<uint8, EModifierByte> BoostLocal;
 	FModifierSavedMove_WithCorrection<uint8, EModifierByte> BoostCorrection;
 	FModifierSavedMove_ServerInitiated<uint8, EModifierByte> BoostServer;
 	

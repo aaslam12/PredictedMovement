@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "ModifierTypes.h"
 #include "GameFramework/Character.h"
 #include "ModifierCharacter.generated.h"
 
@@ -58,8 +59,8 @@ public:
 	 * @see IsModified
 	 * @see CharacterMovement->WantsToModifier
 	 */
-	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation"))
-	virtual void AddModifier(uint8 Level, bool bClientSimulation = false);
+	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation", GameplayTagFilter="Modifier.Boost"))
+	virtual bool Boost(uint8 Level, EModifierNetType NetType, bool bClientSimulation = false);
 
 	/**
 	 * Request the character to stop Modified. The request is processed on the next update of the CharacterMovementComponent.
@@ -67,20 +68,6 @@ public:
 	 * @see IsModified
 	 * @see CharacterMovement->WantsToModifier
 	 */
-	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation"))
-	virtual void RemoveModifier(uint8 Level, bool bClientSimulation = false);
-
-	/** Called when Character stops Modified. Called on non-owned Characters through bIsModified replication. */
-	virtual void OnEndModifier();
-
-	/** Event when Character stops Modified. */
-	UFUNCTION(BlueprintImplementableEvent, meta=(DisplayName="OnEndModifier", ScriptName="OnEndModifier"))
-	void K2_OnEndModifier();
-
-	/** Called when Character Modifieres. Called on non-owned Characters through bIsModified replication. */
-	virtual void OnStartModifier();
-
-	/** Event when Character Modifieres. */
-	UFUNCTION(BlueprintImplementableEvent, meta=(DisplayName="OnStartModifier", ScriptName="OnStartModifier"))
-	void K2_OnStartModifier();
+	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation", GameplayTagFilter="Modifier.Boost"))
+	virtual bool UnBoost(uint8 Level, EModifierNetType NetType, bool bClientSimulation = false);
 };
