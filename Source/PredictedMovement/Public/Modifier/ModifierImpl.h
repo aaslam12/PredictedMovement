@@ -306,13 +306,55 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_WithCorrection final : FMovementM
 	}
 };
 
+/**
+ * Static functions for modifiers
+ */
 struct PREDICTEDMOVEMENT_API FModifierStatics
 {
+	/**
+	 * Serializes the modifier stack to the archive
+	 * @param Modifiers The modifier stack to serialize
+	 * @param Ar The archive to serialize to
+	 * @param ErrorName The name of the Modifier to report if serialization fails
+	 * @param MaxSerializedModifiers The maximum number of modifiers to serialize (default is 8)
+	 * @return True if serialization was successful, false otherwise
+	 */
 	static bool NetSerialize(TModifierStack& Modifiers, FArchive& Ar, const FString& ErrorName, uint8 MaxSerializedModifiers=8);
 
+	/**
+	 * Updates the modifier level based on the specified method
+	 * @param Method The method to use for updating the modifier level
+	 * @param Modifiers The stack of modifiers to update
+	 * @param MaxLevel The maximum level of modifiers
+	 * @param InvalidLevel The level to return if no valid modifiers are found
+	 * @return The updated modifier level
+	 */
 	static TModSize UpdateModifierLevel(EModifierLevelMethod Method, const TModifierStack& Modifiers, TModSize MaxLevel, TModSize InvalidLevel);
+
+	/**
+	 * Combines multiple modifier levels into a single level based on the specified method
+	 * @param Method The method to use for combining the modifier levels
+	 * @param ModifierLevels The stack of modifier levels to combine
+	 * @param MaxLevel The maximum level of modifiers
+	 * @param InvalidLevel The level to return if no valid modifiers are found
+	 * @return The combined modifier level
+	 */
 	static TModSize CombineModifierLevels(EModifierLevelMethod Method, const TModifierStack& ModifierLevels, TModSize MaxLevel, TModSize InvalidLevel);
-	
+
+	/**
+	 * Processes modifiers based on the specified method and updates the current level
+	 * @param CurrentLevel The current modifier level to update
+	 * @param Method The method to use for processing modifiers
+	 * @param LevelTags The tags representing the levels of modifiers
+	 * @param bLimitMaxModifiers Whether to limit the maximum number of modifiers
+	 * @param MaxModifiers The maximum number of modifiers allowed
+	 * @param InvalidLevel The level to return if no valid modifiers are found
+	 * @param Local Pointer to the local predicted modifier, can be nullptr
+	 * @param Correction Pointer to the correction modifier, can be nullptr
+	 * @param Server Pointer to the server initiated modifier, can be nullptr
+	 * @param CanActivateCallback Callback to determine if the modifier can be activated
+	 * @return True if the current level changed, false otherwise
+	 */
 	template<
 	typename TLocalPredicted,
 	typename TCorrection,

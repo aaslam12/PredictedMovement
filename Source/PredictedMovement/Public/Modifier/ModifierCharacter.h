@@ -9,6 +9,10 @@
 #include "ModifierCharacter.generated.h"
 
 class UModifierMovement;
+
+/**
+ * Supports stackable modifiers such as Boost, Snare, and SlowFall.
+ */
 UCLASS()
 class PREDICTEDMOVEMENT_API AModifierCharacter : public ACharacter
 {

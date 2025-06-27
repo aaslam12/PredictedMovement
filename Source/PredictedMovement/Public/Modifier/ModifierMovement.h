@@ -16,7 +16,6 @@ using TMod_Local = FMovementModifier_LocalPredicted;
 using TMod_LocalCorrection = FMovementModifier_WithCorrection;
 using TMod_Server = FMovementModifier_WithCorrection;
 
-
 struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMoveResponseDataContainer
 {  // Server ➜ Client
 	using Super = FCharacterMoveResponseDataContainer;
@@ -64,7 +63,8 @@ private:
 };
 
 /**
- *
+ * Supports stackable modifiers such as Boost, Snare, and SlowFall.
+ * Duplicate the implementations to add your own modifiers. Don't forget to do the same for the character class.
  */
 UCLASS()
 class PREDICTEDMOVEMENT_API UModifierMovement : public UCharacterMovementComponent

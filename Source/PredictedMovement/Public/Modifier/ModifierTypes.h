@@ -84,6 +84,7 @@ struct PREDICTEDMOVEMENT_API FMovementModifierParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=Modifier, meta=(ClampMin="0", UIMin="0", ForceUnits="x"))
 	float BrakingFriction;
 
+	/** If true, this modifier's MaxWalkSpeed scalar affects root motion translation */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=Modifier, meta=(ClampMin="0", UIMin="0", ForceUnits="x"))
 	bool bAffectsRootMotion;
 };
@@ -140,6 +141,11 @@ struct PREDICTEDMOVEMENT_API FFallingModifierParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category=Modifier, meta=(EditCondition="bOverrideAirControl", EditConditionHides))
 	float AirControlOverride;
 
+	/**
+	 * Get the gravity scalar based on the current velocity.
+	 * If bGravityScalarFromVelocityZ is true, uses GravityScalarFallVelocityCurve to determine the scalar based on Velocity.Z.
+	 * Otherwise, returns GravityScalar.
+	 */
 	float GetGravityScalar(const FVector& Velocity) const
 	{
 		if (!ensureMsgf(!bGravityScalarFromVelocityZ || GravityScalarFallVelocityCurve != nullptr, TEXT("GravityScalarFallVelocityCurve must be set")))
@@ -149,12 +155,23 @@ struct PREDICTEDMOVEMENT_API FFallingModifierParams
 		return bGravityScalarFromVelocityZ ? GravityScalarFallVelocityCurve->GetFloatValue(Velocity.Z) : GravityScalar;
 	}
 
+	/**
+	 * Get the air control value based on the current air control scalar.
+	 * If bOverrideAirControl is true, returns AirControlOverride.
+	 * Otherwise, returns AirControlScalar multiplied by CurrentAirControl.
+	 * @param CurrentAirControl The current air control value to scale.
+	 */
 	float GetAirControl(float CurrentAirControl) const
 	{
 		return bOverrideAirControl ? AirControlOverride : AirControlScalar * CurrentAirControl;
 	}
 };
 
+/**
+ * Client auth parameters for providing client with partial positional authority
+ * These parameters can be used to configure how the client can send position updates to the server
+ * Useful for short bursts of movement that are difficult to sync over the network
+ */
 USTRUCT(BlueprintType)
 struct PREDICTEDMOVEMENT_API FClientAuthParams
 {
@@ -250,18 +267,25 @@ struct PREDICTEDMOVEMENT_API FClientAuthData
 		, Priority(InPriority)
 	{}
 
+	/** The alpha value of the client auth data, used to determine how much authority the client has */
 	UPROPERTY()
 	float Alpha;
-	
+
+	/** The time remaining for the client to have positional authority */
 	UPROPERTY()
 	float TimeRemaining;
 
 	UPROPERTY()
 	uint64 Id;
-	
+
+	/** The source of the client auth data, used to determine which gameplay tag this data is associated with */
 	UPROPERTY()
 	FGameplayTag Source;
-	
+
+	/**
+	 * The priority of the client auth data, used to determine which data to use when multiple sources are present
+	 * Lower values are more important
+	 */
 	UPROPERTY()
 	int32 Priority;
 
@@ -292,6 +316,7 @@ struct PREDICTEDMOVEMENT_API FClientAuthStack
 	FClientAuthStack()
 	{}
 
+	/** Stack of client auth data */
 	UPROPERTY()
 	TArray<FClientAuthData> Stack;
 
@@ -305,6 +330,10 @@ struct PREDICTEDMOVEMENT_API FClientAuthStack
 		return !(*this == Other);
 	}
 
+	/**
+	 * Sorts the stack by priority, in ascending order
+	 * Lower priority values are more important
+	 */
 	void SortByPriority()
 	{
 		Stack.Sort([](const FClientAuthData& A, const FClientAuthData& B)
@@ -313,6 +342,11 @@ struct PREDICTEDMOVEMENT_API FClientAuthStack
 		});
 	}
 
+	/**
+	 * Filters the stack by priority, returning only the data with the specified priority
+	 * @param Priority The priority to filter by
+	 * @return An array of FClientAuthData with the specified priority
+	 */
 	TArray<FClientAuthData> FilterPriority(int32 Priority) const
 	{
 		return Stack.FilterByPredicate([Priority](const FClientAuthData& AuthData)
@@ -321,6 +355,9 @@ struct PREDICTEDMOVEMENT_API FClientAuthStack
 		});
 	}
 
+	/**
+	 * Determines the lowest priority in the stack
+	 */
 	int32 DetermineLowestPriority()
 	{
 		if (Stack.Num() == 0)
@@ -388,6 +425,10 @@ struct PREDICTEDMOVEMENT_API FClientAuthStack
 		});
 	}
 
+	/**
+	 * Updates the time remaining for each client auth data in the stack
+	 * And removes any data that has expired (TimeRemaining <= 0)
+	 */
 	void Update(float DeltaTime)
 	{
 		Stack.RemoveAll([DeltaTime](FClientAuthData& Data)
