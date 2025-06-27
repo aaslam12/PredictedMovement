@@ -83,7 +83,8 @@ TModSize FModifierStatics::UpdateModifierLevel(EModifierLevelMethod Method, cons
 	case EModifierLevelMethod::Stack:
 		for (const TModSize& Level : Modifiers)
 		{
-			NewLevel += Level;
+			// We are only counting the number of modifiers, so we add 1 because levels are 0-based
+			NewLevel += Level + 1;
 		}
 		break;
 
@@ -92,6 +93,7 @@ TModSize FModifierStatics::UpdateModifierLevel(EModifierLevelMethod Method, cons
 			uint64 Total = 0;
 			for (const TModSize& Level : Modifiers)
 			{
+				// We don't add 1 here because we are averaging the levels, not counting them
 				Total += Level;
 			}
 			NewLevel = static_cast<TModSize>(Total / Modifiers.Num());
@@ -148,5 +150,6 @@ TModSize FModifierStatics::CombineModifierLevels(EModifierLevelMethod Method, co
 		return InvalidLevel;
 	}
 
+	// Clamp to max allowed
 	return FMath::Min(NewLevel, MaxLevel);
 }
