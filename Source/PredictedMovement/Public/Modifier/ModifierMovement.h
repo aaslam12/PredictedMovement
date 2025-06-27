@@ -13,8 +13,8 @@
 class AModifierCharacter;
 
 using TMod_Local = FMovementModifier_LocalPredicted;
-using TMod_LocalCorrection = FMovementModifier_LocalPredicted_WithCorrection;
-using TMod_Server = FMovementModifier_ServerInitiated;
+using TMod_LocalCorrection = FMovementModifier_WithCorrection;
+using TMod_Server = FMovementModifier_WithCorrection;
 
 
 struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMoveResponseDataContainer

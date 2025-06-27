@@ -70,22 +70,21 @@ public:
 	virtual void OnRep_SimulatedBoost(uint8 PrevLevel);
 
 	/**
-	 * Request the character to start Modified. The request is processed on the next update of the CharacterMovementComponent.
-	 * @see OnStartModifier
-	 * @see IsModified
-	 * @see CharacterMovement->WantsToModifier
+	 * Request the character to start Boost. The request is processed on the next update of the CharacterMovementComponent.
+	 * @param Level The level of the Boost to remove.
+	 * @param NetType How the Boost is applied, either locally predicted, with correction, or server initiated.
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Boost"))
 	virtual bool Boost(FGameplayTag Level, EModifierNetType NetType);
 
 	/**
-	 * Request the character to stop Modified. The request is processed on the next update of the CharacterMovementComponent.
-	 * @see OnEndModifier
-	 * @see IsModified
-	 * @see CharacterMovement->WantsToModifier
+	 * Request the character to stop Boost. The request is processed on the next update of the CharacterMovementComponent.
+	 * @param Level The level of the Boost to remove.
+	 * @param NetType How the Boost is applied, either locally predicted, with correction, or server initiated.
+	 * @param bRemoveAll If true, removes all Boosts of the specified level, otherwise only removes the first one found.
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Boost"))
-	virtual bool UnBoost(FGameplayTag Level, EModifierNetType NetType);
+	virtual bool UnBoost(FGameplayTag Level, EModifierNetType NetType, bool bRemoveAll=false);
 
 	UFUNCTION(BlueprintCallable, Category=Character)
 	virtual bool ResetBoost(EModifierNetType NetType);

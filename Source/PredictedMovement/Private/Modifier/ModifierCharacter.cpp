@@ -100,7 +100,7 @@ bool AModifierCharacter::Boost(FGameplayTag Level, EModifierNetType NetType)
 	return false;
 }
 
-bool AModifierCharacter::UnBoost(FGameplayTag Level, EModifierNetType NetType)
+bool AModifierCharacter::UnBoost(FGameplayTag Level, EModifierNetType NetType, bool bRemoveAll)
 {
 	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy && Level.IsValid())
 	{
@@ -113,13 +113,13 @@ bool AModifierCharacter::UnBoost(FGameplayTag Level, EModifierNetType NetType)
 		switch (NetType)
 		{
 		case EModifierNetType::LocalPredicted:
-			return ModifierMovement->BoostLocal.RemoveModifier(LevelIndex);
+			return ModifierMovement->BoostLocal.RemoveModifier(LevelIndex, bRemoveAll);
 		case EModifierNetType::WithCorrection:
-			return ModifierMovement->BoostCorrection.RemoveModifier(LevelIndex);
+			return ModifierMovement->BoostCorrection.RemoveModifier(LevelIndex, bRemoveAll);
 		case EModifierNetType::ServerInitiated:
 			if (HasAuthority())
 			{
-				return ModifierMovement->BoostServer.RemoveModifier(LevelIndex);
+				return ModifierMovement->BoostServer.RemoveModifier(LevelIndex, bRemoveAll);
 			}
 		default: return false;
 		}

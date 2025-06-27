@@ -180,16 +180,12 @@ struct PREDICTEDMOVEMENT_API FModifierMoveData_ServerInitiated
 
 /**
  * Represents a single modifier that can be applied to a character
- * Local Predicted modifier is activated via player input and is predicted on the client
- * e.g. Sprint, Crouch, etc.
+ * This is the base class for all modifiers, which can be local predicted, with correction, or server initiated
  */
-struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
+struct PREDICTEDMOVEMENT_API FMovementModifier
 {
-	FMovementModifier_LocalPredicted()
-	{}
-
 	FMovementModifierData Data;
-
+	
 	TModSize GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
 	TModSize GetModifierLevel() const { return Data.Modifiers.Num(); }
 
@@ -199,11 +195,18 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 		return true;
 	}
 
-	bool RemoveModifier(TModSize Level)
+	bool RemoveModifier(TModSize Level, bool bRemoveAll)
 	{
 		if (Data.WantsModifiers.Contains(Level))
 		{
-			Data.WantsModifiers.Remove(Level);
+			if (bRemoveAll)
+			{
+				Data.WantsModifiers.RemoveAll([Level](const TModSize& ModLevel) { return ModLevel == Level; });
+			}
+			else
+			{
+				Data.WantsModifiers.Remove(Level);
+			}
 			return true;
 		}
 		return false;
@@ -218,7 +221,7 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 		}
 		return false;
 	}
-
+	
 	bool UpdateMovementState(bool bAllowedInCurrentState)
 	{
 		const TModifierStack Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TModifierStack();
@@ -229,6 +232,17 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 		}
 		return false;
 	}
+};
+
+/**
+ * Represents a single modifier that can be applied to a character
+ * Local Predicted modifier is activated via player input and is predicted on the client
+ * e.g. Sprint, Crouch, etc.
+ */
+struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted : FMovementModifier
+{
+	FMovementModifier_LocalPredicted()
+	{}
 
 	void ServerMove_PerformMovement(const TModifierStack& WantsModifiers)
 	{
@@ -243,75 +257,16 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 
 /**
  * Represents a single modifier that can be applied to a character
+ * 
  * Local Predicted modifier is activated via a predicted state (GAS) and is predicted on the client
  * However, if the server disagrees with the client, it will correct the client
+ *
+ * Alternatively, initiated by the server and sent to the client
+ * 
  * e.g. Speed increase after equipping a knife via predicted inventory ability, etc.
  */
-struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted_WithCorrection final : FMovementModifier_LocalPredicted
+struct PREDICTEDMOVEMENT_API FMovementModifier_WithCorrection final : FMovementModifier_LocalPredicted
 {
-	bool ServerCheckClientError(const TModifierStack& Modifiers) const
-	{
-		return Data.Modifiers != Modifiers;
-	}
-
-	void OnClientCorrectionReceived(const TModifierStack& Modifiers)
-	{
-		Data.WantsModifiers = Modifiers;
-	}
-};
-
-/**
- * Represents a single modifier that can be applied to a character
- * Server Authority modifier is activated by the server and is not predicted on the client
- * e.g. Snare from a damage event, speed increase after equipping a knife from a server event, etc.
- */
-struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated
-{
-	FMovementModifier_ServerInitiated()
-	{}
-
-	FMovementModifierData Data;
-
-	TModSize GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
-	TModSize GetModifierLevel() const { return Data.Modifiers.Num(); }
-
-	bool AddModifier(TModSize Level)
-	{
-		Data.WantsModifiers.Add(Level);
-		return true;
-	}
-
-	bool RemoveModifier(TModSize Level)
-	{
-		if (Data.WantsModifiers.Contains(Level))
-		{
-			Data.WantsModifiers.Remove(Level);
-			return true;
-		}
-		return false;
-	}
-
-	bool ResetModifiers()
-	{
-		if (Data.WantsModifiers.Num() > 0)
-		{
-			Data.WantsModifiers.Reset();
-			return true;
-		}
-		return false;
-	}
-
-	bool UpdateMovementState(bool bAllowedInCurrentState)
-	{
-		const TModifierStack Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TModifierStack();
-		if (Data.Modifiers != Modifiers)
-		{
-			Data.Modifiers = Modifiers;
-			return true;
-		}
-		return false;
-	}
-	
 	bool ServerCheckClientError(const TModifierStack& Modifiers) const
 	{
 		return Data.Modifiers != Modifiers;
