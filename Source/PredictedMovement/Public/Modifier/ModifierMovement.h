@@ -30,7 +30,6 @@ struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMove
 {  // Server ➜ Client
 	using Super = FCharacterMoveResponseDataContainer;
 
-	// uint8 Modifiers;  // AUTH
 	FModifierMoveResponse<uint8, EModifierByte> BoostCorrection;
 	FModifierMoveResponse<uint8, EModifierByte> BoostServer;
 	FModifierMoveResponse<uint8, EModifierByte> SnareServer;
@@ -45,12 +44,7 @@ public:
 	typedef FCharacterNetworkMoveData Super;
  
 	FModifierNetworkMoveData()
-		// : WantsModifiers(0)
-		// , Modifiers(0)
 	{}
-
-	// uint8 WantsModifiers;
-	// uint8 Modifiers;  // AUTH
 
 	FModifierMoveData_LocalPredicted<uint8> BoostLocal;
 	FModifierMoveData_WithCorrection<uint8> BoostCorrection;
@@ -89,15 +83,6 @@ private:
 	/** Character movement component belongs to */
 	UPROPERTY(Transient, DuplicateTransient)
 	TObjectPtr<AModifierCharacter> ModifierCharacterOwner;
-
-public:
-	/** Max Acceleration (rate of change of velocity) */
-	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0"))
-	float MaxAccelerationModified;
-	
-	/** The maximum ground speed when Modified. */
-	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0", ForceUnits="cm/s"))
-	float MaxWalkSpeedModified;
 
 public:
 	/**
@@ -242,15 +227,10 @@ class PREDICTEDMOVEMENT_API FSavedMove_Character_Modifier : public FSavedMove_Ch
 
 public:
 	FSavedMove_Character_Modifier()
-		// : WantsModifiers(0)
-		// , Modifiers(0)
 	{}
 
 	virtual ~FSavedMove_Character_Modifier() override
 	{}
-
-	// uint8 WantsModifiers;
-	// uint8 Modifiers;  // AUTH
 
 	FModifierSavedMove<uint8, EModifierByte> BoostLocal;
 	FModifierSavedMove_WithCorrection<uint8, EModifierByte> BoostCorrection;

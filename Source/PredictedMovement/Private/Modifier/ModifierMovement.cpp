@@ -20,11 +20,9 @@ void FModifierMoveResponseDataContainer::ServerFillResponseData(const UCharacter
 	// Server ➜ Client
 	const UModifierMovement* MoveComp = Cast<UModifierMovement>(&CharacterMovement);
 	
-	BoostCorrection.ServerFillResponseData(MoveComp->BoostCorrection.Data.Modifiers);  // AUTH
-	BoostServer.ServerFillResponseData(MoveComp->BoostServer.Data.Modifiers);  // AUTH
-	SnareServer.ServerFillResponseData(MoveComp->SnareServer.Data.Modifiers);  // AUTH
-	
-	// Modifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->Modifiers);  // AUTH
+	BoostCorrection.ServerFillResponseData(MoveComp->BoostCorrection.Data.Modifiers);
+	BoostServer.ServerFillResponseData(MoveComp->BoostServer.Data.Modifiers);
+	SnareServer.ServerFillResponseData(MoveComp->SnareServer.Data.Modifiers);
 }
 
 bool FModifierMoveResponseDataContainer::Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar,
@@ -38,8 +36,8 @@ bool FModifierMoveResponseDataContainer::Serialize(UCharacterMovementComponent& 
 	// Server ➜ Client
 	if (IsCorrection())
 	{
-		Ar << BoostCorrection.Modifiers;  // AUTH
-		Ar << BoostServer.Modifiers;  // AUTH
+		Ar << BoostCorrection.Modifiers;
+		Ar << BoostServer.Modifiers;
 		Ar << SnareServer.Modifiers;
 	}
 
@@ -65,8 +63,6 @@ void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Charac
 	BoostServer.ClientFillNetworkMoveData(SavedMove.BoostServer.Modifiers);
 	
 	SnareServer.ClientFillNetworkMoveData(SavedMove.SnareServer.Modifiers);
-	// WantsModifiers = SavedMove.WantsModifiers;
-	// Modifiers = SavedMove.Modifiers;  // AUTH
 }
 
 bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar,
@@ -82,13 +78,13 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 
 	Ar << BoostLocal.WantsModifiers;
 	Ar << BoostCorrection.WantsModifiers;
-	Ar << BoostCorrection.Modifiers;  // AUTH
-	Ar << BoostServer.Modifiers;  // AUTH
+	Ar << BoostCorrection.Modifiers;
+	Ar << BoostServer.Modifiers;
 	
 	Ar << SnareServer.Modifiers;
 	
 	// Ar << WantsModifiers;
-	// Ar << Modifiers;  // AUTH
+	// Ar << Modifiers;
 	
 	// // Serialize the number of elements
 	// uint8 NumModifiers = WantsModifiers.Num();
@@ -124,10 +120,6 @@ UModifierMovement::UModifierMovement(const FObjectInitializer& ObjectInitializer
 {
 	SetNetworkMoveDataContainer(ModifierMoveDataContainer);
 	SetMoveResponseDataContainer(ModifierMoveResponseDataContainer);
-
-	// @TODO nuke
-	MaxAccelerationModified = 250.f;
-	MaxWalkSpeedModified = 250.f;
 
 	// Init Modifier Levels
 	Boost.Add(FModifierTags::Modifier_Boost, { 1.50f });  // 50% Speed Boost
@@ -309,7 +301,6 @@ void UModifierMovement::ServerMove_PerformMovement(const FCharacterNetworkMoveDa
 	
 	const FModifierNetworkMoveData& ModifierMoveData = static_cast<const FModifierNetworkMoveData&>(MoveData);
 
-	// WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(ModifierMoveData.WantsModifiers);
 	BoostLocal.ServerMove_PerformMovement(ModifierMoveData.BoostLocal.WantsModifiers);
 	BoostCorrection.ServerMove_PerformMovement(ModifierMoveData.BoostCorrection.WantsModifiers);
 
@@ -328,24 +319,17 @@ bool UModifierMovement::ServerCheckClientError(float ClientTimeStamp, float Delt
 		return true;
 	}
     
-	/*
-	 * This will trigger a client correction if the value in the Client differs
-	 */
+	// Trigger a client correction if the value in the Client differs
 	const FModifierNetworkMoveData* CurrentMoveData = static_cast<const FModifierNetworkMoveData*>(GetCurrentNetworkMoveData());
-	
-	// if (FModifierCompression::GetBitmaskFromModifiers(Modifiers) != CurrentMoveData->Modifiers)
-	// {
-	// 	return true;  // AUTH
-	// }
 
 	if (BoostCorrection.ServerCheckClientError(CurrentMoveData->BoostCorrection.Modifiers))
 	{
-		return true;  // AUTH
+		return true;
 	}
 
 	if (BoostServer.ServerCheckClientError(CurrentMoveData->BoostServer.Modifiers))
 	{
-		return true;  // AUTH
+		return true;
 	}
 
 	// @TODO client auth for snare (have not confirmed we do it here, check first...)
@@ -368,14 +352,13 @@ void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_
 #endif
 	)
 {
-	// This occurs on AutonomousProxy, when the server sends the move response
+	// Occurs on AutonomousProxy, when the server sends the move response
 	// This is where we receive the snare, and can override the server's location, assuming it has given us authority
 
 	// Server >> SendClientAdjustment() ➜ ServerSendMoveResponse() ➜ ServerFillResponseData() + MoveResponsePacked_ServerSend() >> Client
 	// >> ClientMoveResponsePacked() ➜ ClientHandleMoveResponse() ➜ ClientAdjustPosition_Implementation() ➜ OnClientCorrectionReceived()
 	
 	const FModifierMoveResponseDataContainer& MoveResponse = static_cast<const FModifierMoveResponseDataContainer&>(GetMoveResponseDataContainer());
-	// WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(MoveResponse.Modifiers);  // AUTH
 
 	BoostCorrection.OnClientCorrectionReceived(MoveResponse.BoostCorrection.Modifiers);
 	BoostServer.OnClientCorrectionReceived(MoveResponse.BoostServer.Modifiers);
@@ -387,15 +370,11 @@ void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_
 
 bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 {
-	// const TArray<EModifierByte> RealWantsModifiers = WantsModifiers;
-
 	const TArray RealBoostLocal = BoostLocal.Data.WantsModifiers;
 	const TArray RealBoostCorrection = BoostCorrection.Data.WantsModifiers;
 	
 	const bool bResult = Super::ClientUpdatePositionAfterServerUpdate();
 	
-	// WantsModifiers = RealWantsModifiers;
-
 	BoostLocal.Data.WantsModifiers = RealBoostLocal;
 	BoostCorrection.Data.WantsModifiers = RealBoostCorrection;
 
@@ -464,9 +443,6 @@ void FSavedMove_Character_Modifier::Clear()
 {
 	Super::Clear();
 
-	// WantsModifiers = 0;
-	// Modifiers = 0;  // AUTH
-
 	BoostLocal.Clear();
 	BoostCorrection.Clear();
 	BoostServer.Clear();
@@ -482,8 +458,6 @@ void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime,
 
 	if (const UModifierMovement* MoveComp = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement())
 	{
-		// Bit pack the modifiers into a bitfield.
-		// WantsModifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->WantsModifiers);
 		BoostLocal.SetMoveFor(MoveComp->BoostLocal.Data.WantsModifiers);
 		BoostCorrection.SetMoveFor(MoveComp->BoostCorrection.Data.WantsModifiers);
 	}
@@ -510,11 +484,6 @@ bool FSavedMove_Character_Modifier::CanCombineWith(const FSavedMovePtr& NewMove,
 
 	// We can only combine moves if they will result in the same state as if both moves were processed individually,
 	// because the AutonomousProxy Client processes them individually prior to sending them to the server.
-	
-	// if (WantsModifiers != SavedMove->WantsModifiers)
-	// {
-	// 	return false;
-	// }
 
 	if (!BoostLocal.CanCombineWith(SavedMove->BoostLocal.WantsModifiers)) { return false; }
 	if (!BoostCorrection.CanCombineWith(SavedMove->BoostCorrection.WantsModifiers)) { return false; }
@@ -534,7 +503,6 @@ void FSavedMove_Character_Modifier::SetInitialPosition(ACharacter* C)
 	{
 		BoostLocal.SetInitialPosition(MoveComp->BoostLocal.Data.WantsModifiers);
 		BoostCorrection.SetInitialPosition(MoveComp->BoostCorrection.Data.WantsModifiers);
-		// WantsModifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->WantsModifiers);
 	}
 }
 
@@ -549,7 +517,6 @@ void FSavedMove_Character_Modifier::CombineWith(const FSavedMove_Character* OldM
 	{
 		MoveComp->BoostLocal.CombineWith(SavedOldMove->BoostLocal.WantsModifiers);
 		MoveComp->BoostCorrection.CombineWith(SavedOldMove->BoostCorrection.WantsModifiers);
-		// MoveComp->WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(SavedOldMove->WantsModifiers);
 	}
 }
 
@@ -558,10 +525,9 @@ void FSavedMove_Character_Modifier::PostUpdate(ACharacter* C, EPostUpdateMode Po
 	// When considering whether to delay or combine moves, we need to compare the move at the start and the end
 	if (const UModifierMovement* MoveComp = C ? Cast<UModifierMovement>(C->GetCharacterMovement()) : nullptr)
 	{
-		BoostCorrection.PostUpdate(MoveComp->BoostCorrection.Data.Modifiers);  // AUTH
-		BoostServer.PostUpdate(MoveComp->BoostServer.Data.Modifiers);  // AUTH
+		BoostCorrection.PostUpdate(MoveComp->BoostCorrection.Data.Modifiers);
+		BoostServer.PostUpdate(MoveComp->BoostServer.Data.Modifiers);
 		SnareServer.PostUpdate(MoveComp->SnareServer.Data.Modifiers);
-		// Modifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->Modifiers);  // AUTH
 	}
 
 	Super::PostUpdate(C, PostUpdateMode);
@@ -569,11 +535,9 @@ void FSavedMove_Character_Modifier::PostUpdate(ACharacter* C, EPostUpdateMode Po
 
 bool FSavedMove_Character_Modifier::IsImportantMove(const FSavedMovePtr& LastAckedMove) const
 {
+	// Important moves get sent again if not acked by the server
+	
 	const TSharedPtr<FSavedMove_Character_Modifier>& SavedMove = StaticCastSharedPtr<FSavedMove_Character_Modifier>(LastAckedMove);
-	// if (WantsModifiers != SavedMove->WantsModifiers)
-	// {
-	// 	return true;
-	// }
 
 	if (BoostLocal.IsImportantMove(SavedMove->BoostLocal.WantsModifiers))
 	{
