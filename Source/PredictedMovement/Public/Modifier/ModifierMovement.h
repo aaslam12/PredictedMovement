@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "ModifierTypes.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Modifier/ModifierCompression.h"
 #include "System/PredictedMovementVersioning.h"
@@ -15,8 +16,9 @@ struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMove
 {  // Server ➜ Client
 	using Super = FCharacterMoveResponseDataContainer;
 
-	uint8 Modifiers;  // AUTH
-	
+	// uint8 Modifiers;  // AUTH
+	FModifierMoveResponse<uint8, EModifierByte> BoostCorrection;
+
 	virtual void ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement, const FClientAdjustment& PendingAdjustment) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap) override;
 };
@@ -27,12 +29,14 @@ public:
 	typedef FCharacterNetworkMoveData Super;
  
 	FModifierNetworkMoveData()
-		: WantsModifiers(0)
-		, Modifiers(0)
+		// : WantsModifiers(0)
+		// , Modifiers(0)
 	{}
 
-	uint8 WantsModifiers;
-	uint8 Modifiers;  // AUTH
+	// uint8 WantsModifiers;
+	// uint8 Modifiers;  // AUTH
+
+	FModifierMoveData_WithCorrection<uint8> BoostCorrection;
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -77,36 +81,18 @@ public:
 	float MaxWalkSpeedModified;
 
 public:
-	/**
-	 * @TODO use a templated class
-	 * The requested input state, which requests modifiers of the specified level
-	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
-	 */
-	UPROPERTY()
-	TArray<EModifierByte> WantsModifiers;
-
-	/**
-	 * The actual state, which represents the actual modifiers applied to the character
-	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
-	 */
-	UPROPERTY()
-	TArray<EModifierByte> Modifiers;
-
-	UPROPERTY()
-	bool bStupid = false;
+	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
+	FMovementModifier_LocalPredicted<uint8, EModifierByte> Boost;
+	FMovementModifier_LocalPredicted_WithCorrection<uint8, EModifierByte> BoostCorrection;
+	FMovementModifier_ServerInitiated<uint8, EModifierByte> BoostServer;
 	
-	UFUNCTION(BlueprintCallable, Category="Character Movement (Modifier)")
-	void DoSomethingStupid()
-	{
-		bStupid = true;
-	}
-
 public:
 	UModifierMovement(const FObjectInitializer& ObjectInitializer);
 
 	virtual bool HasValidData() const override;
 	virtual void PostLoad() override;
 	virtual void SetUpdatedComponent(USceneComponent* NewUpdatedComponent) override;
+	virtual void BeginPlay() override;
 
 public:
 	virtual float GetMaxAcceleration() const override;
@@ -117,41 +103,16 @@ public:
 	virtual void ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration) override;
 
 public:
-	uint8 GetWantedModifierLevel() const
-	{
-		return WantsModifiers.Num();
-	}
-	
-	uint8 GetModifierLevel() const
-	{
-		// @TODO sim proxy
-		return Modifiers.Num();
-	}
+	/* BOOST Implementation */
 
-	template<typename T>
-	void AddWantedModifier(T InLevel)
-	{
-		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return; }
-		
-		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
-		if (!WantsModifiers.Contains(Level))
-		{
-			WantsModifiers.Add(Level);
-		}
-	}
-
-	template<typename T>
-	void RemoveWantedModifier(T InLevel)
-	{
-		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return; }
-		
-		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
-		if (WantsModifiers.Contains(Level))
-		{
-			WantsModifiers.Remove(Level);
-		}
-	}
+	virtual uint8 GetBoostLevel() const { return BoostCorrection.GetModifierLevel(); }
+	virtual bool CanBoostInCurrentState() const;
+	virtual TArray<EModifierByte> GetBoostModifiersForCurrentState() const;
 	
+	/* ~BOOST Implementation */
+	
+public:
+
 	/**
 	 * Call CharacterOwner->OnStartModifier() if successful.
 	 * In general you should set WantsModifierLevel instead to have the Modifier persist during movement, or just use the Modifier functions on the owning Character.
@@ -159,11 +120,6 @@ public:
 	 */
 	virtual void ChangeModifiers(const TArray<EModifierByte>& NewModifiers, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
 
-	/** Returns true if the character is allowed to Modifier in the current state. */
-	virtual TArray<EModifierByte> GetModifiersForCurrentState() const;
-	
-	/** Returns true if the character is allowed to Modifier in the current state. */
-	virtual uint8 GetModifierLevelForCurrentState() const;
 	void UpdateModifierMovementState();
 
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
@@ -203,15 +159,17 @@ class PREDICTEDMOVEMENT_API FSavedMove_Character_Modifier : public FSavedMove_Ch
 
 public:
 	FSavedMove_Character_Modifier()
-		: WantsModifiers(0)
-		, Modifiers(0)
+		// : WantsModifiers(0)
+		// , Modifiers(0)
 	{}
 
 	virtual ~FSavedMove_Character_Modifier() override
 	{}
 
-	uint8 WantsModifiers;
-	uint8 Modifiers;  // AUTH
+	// uint8 WantsModifiers;
+	// uint8 Modifiers;  // AUTH
+
+	FModifierSavedMove_WithCorrection<uint8, EModifierByte> BoostCorrection;
 		
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;

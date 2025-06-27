@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "GameFramework/Character.h"
 #include "ModifierCharacter.generated.h"
 
@@ -20,11 +21,26 @@ protected:
 	friend class FSavedMove_Character_Modifier;
 protected:
 	FORCEINLINE UModifierMovement* GetModifierCharacterMovement() const { return ModifierMovement; }
+
+public:
+	virtual void OnModifierChanged(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+	virtual void OnModifierAdded(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+	virtual void OnModifierRemoved(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+
+	UFUNCTION(BlueprintImplementableEvent, Category=Character, meta=(DisplayName="On Modifier Added"))
+	void K2_OnModifierAdded(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+
+	UFUNCTION(BlueprintImplementableEvent, Category=Character, meta=(DisplayName="On Modifier Changed"))
+	void K2_OnModifierChanged(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+
+	UFUNCTION(BlueprintImplementableEvent, Category=Character, meta=(DisplayName="On Modifier Removed"))
+	void K2_OnModifierRemoved(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+
 	
 public:
 	/** Set by character movement to specify that this Character is currently Modified. */
-	UPROPERTY(BlueprintReadOnly, replicatedUsing=OnRep_SimulatedModifierLevel, Category=Character)
-	uint8 SimulatedModifierLevel;
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing=OnRep_SimulatedBoost, Category=Character)
+	uint8 SimulatedBoost = 0;
 
 public:
 	AModifierCharacter(const FObjectInitializer& FObjectInitializer);
@@ -34,7 +50,7 @@ public:
 public:
 	/** Handle Crouching replicated from server */
 	UFUNCTION()
-	virtual void OnRep_SimulatedModifierLevel(uint8 PrevLevel);
+	virtual void OnRep_SimulatedBoost(uint8 PrevLevel);
 
 	/**
 	 * Request the character to start Modified. The request is processed on the next update of the CharacterMovementComponent.
