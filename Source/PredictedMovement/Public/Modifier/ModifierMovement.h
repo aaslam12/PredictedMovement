@@ -13,6 +13,18 @@
 
 class AModifierCharacter;
 
+using Mod_Local_Byte = FMovementModifier_LocalPredicted<uint8, EModifierByte>;
+using Mod_Local_Short = FMovementModifier_LocalPredicted<uint16, EModifierShort>;
+using Mod_Local_Long = FMovementModifier_LocalPredicted<uint32, EModifierLong>;
+
+using Mod_LocalCorrection_Byte = FMovementModifier_LocalPredicted_WithCorrection<uint8, EModifierByte>;
+using Mod_LocalCorrection_Short = FMovementModifier_LocalPredicted_WithCorrection<uint16, EModifierShort>;
+using Mod_LocalCorrection_Long = FMovementModifier_LocalPredicted_WithCorrection<uint32, EModifierLong>;
+
+using Mod_Server_Byte = FMovementModifier_ServerInitiated<uint8, EModifierByte>;
+using Mod_Server_Short = FMovementModifier_ServerInitiated<uint16, EModifierShort>;
+using Mod_Server_Long = FMovementModifier_ServerInitiated<uint32, EModifierLong>;
+
 
 struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMoveResponseDataContainer
 {  // Server ➜ Client
@@ -21,6 +33,7 @@ struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMove
 	// uint8 Modifiers;  // AUTH
 	FModifierMoveResponse<uint8, EModifierByte> BoostCorrection;
 	FModifierMoveResponse<uint8, EModifierByte> BoostServer;
+	FModifierMoveResponse<uint8, EModifierByte> SnareServer;
 
 	virtual void ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement, const FClientAdjustment& PendingAdjustment) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap) override;
@@ -42,6 +55,7 @@ public:
 	FModifierMoveData_LocalPredicted<uint8> BoostLocal;
 	FModifierMoveData_WithCorrection<uint8> BoostCorrection;
 	FModifierMoveData_ServerInitiated<uint8> BoostServer;
+	FModifierMoveData_ServerInitiated<uint8> SnareServer;
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -103,9 +117,29 @@ public:
 	EModifierLevelMethod BoostLevelMethod;
 	
 	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
-	FMovementModifier_LocalPredicted<uint8, EModifierByte> BoostLocal;
-	FMovementModifier_LocalPredicted_WithCorrection<uint8, EModifierByte> BoostCorrection;
-	FMovementModifier_ServerInitiated<uint8, EModifierByte> BoostServer;
+	Mod_Local_Byte BoostLocal;
+	Mod_LocalCorrection_Byte BoostCorrection;
+	Mod_Server_Byte BoostServer;
+
+public:
+	/**
+	 * Boost increases movement speed and acceleration
+	 * Scaling applied on a per-boost-level basis
+	 * Every tag defined here must also be defined in the FModifierData Boost property
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
+	TMap<FGameplayTag, FMovementModifierParams> Snare;
+
+	/** Indexed list of Boost levels, used to determine the current Boost level */
+	UPROPERTY()
+	TArray<FGameplayTag> SnareLevels;
+
+	/** The method used to calculate boost levels */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
+	EModifierLevelMethod SnareLevelMethod;
+	
+	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
+	FMovementModifier_ServerInitiated<uint8, EModifierByte> SnareServer;
 	
 public:
 	UModifierMovement(const FObjectInitializer& ObjectInitializer);
@@ -130,7 +164,7 @@ public:
 	virtual void ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration) override;
 
 public:
-	/* BOOST Implementation */
+	/* Boost Implementation */
 
 	uint8 BoostLevel = UINT8_MAX;
 	const FMovementModifierParams* GetBoostParams() const { return Boost.Find(GetBoostLevel()); }
@@ -145,7 +179,25 @@ public:
 	float GetBoostBrakingFrictionScalar() const { return GetBoostParams() ? GetBoostParams()->BrakingFriction : 1.f; }
 	bool BoostAffectsRootMotion() const { return GetBoostParams() ? GetBoostParams()->bAffectsRootMotion : false; }
 	
-	/* ~BOOST Implementation */
+	/* ~Boost Implementation */
+
+public:
+	/* Snare Implementation */
+
+	uint8 SnareLevel = UINT8_MAX;
+	const FMovementModifierParams* GetSnareParams() const { return Snare.Find(GetSnareLevel()); }
+	FGameplayTag GetSnareLevel() const { return SnareLevels.IsValidIndex(SnareLevel) ? SnareLevels[SnareLevel] : FGameplayTag::EmptyTag; }
+	uint8 GetSnareLevelIndex(const FGameplayTag& Level) const { return SnareLevels.IndexOfByKey(Level) > INDEX_NONE ? SnareLevels.IndexOfByKey(Level) : UINT8_MAX; }
+	virtual bool CanSnareInCurrentState() const;
+
+	float GetSnareSpeedScalar() const { return GetSnareParams() ? GetSnareParams()->MaxWalkSpeed : 1.f; }
+	float GetSnareAccelScalar() const { return GetSnareParams() ? GetSnareParams()->MaxAcceleration : 1.f; }
+	float GetSnareBrakingScalar() const { return GetSnareParams() ? GetSnareParams()->BrakingDeceleration : 1.f; }
+	float GetSnareGroundFrictionScalar() const { return GetSnareParams() ? GetSnareParams()->GroundFriction : 1.f; }
+	float GetSnareBrakingFrictionScalar() const { return GetSnareParams() ? GetSnareParams()->BrakingFriction : 1.f; }
+	bool SnareAffectsRootMotion() const { return GetSnareParams() ? GetSnareParams()->bAffectsRootMotion : false; }
+	
+	/* ~Snare Implementation */
 	
 public:
 	void UpdateModifierMovementState();
@@ -203,6 +255,8 @@ public:
 	FModifierSavedMove<uint8, EModifierByte> BoostLocal;
 	FModifierSavedMove_WithCorrection<uint8, EModifierByte> BoostCorrection;
 	FModifierSavedMove_ServerInitiated<uint8, EModifierByte> BoostServer;
+	
+	FModifierSavedMove_ServerInitiated<uint8, EModifierByte> SnareServer;
 	
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;

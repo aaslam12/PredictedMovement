@@ -22,6 +22,7 @@ void FModifierMoveResponseDataContainer::ServerFillResponseData(const UCharacter
 	
 	BoostCorrection.ServerFillResponseData(MoveComp->BoostCorrection.Data.Modifiers);  // AUTH
 	BoostServer.ServerFillResponseData(MoveComp->BoostServer.Data.Modifiers);  // AUTH
+	SnareServer.ServerFillResponseData(MoveComp->SnareServer.Data.Modifiers);  // AUTH
 	
 	// Modifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->Modifiers);  // AUTH
 }
@@ -39,6 +40,7 @@ bool FModifierMoveResponseDataContainer::Serialize(UCharacterMovementComponent& 
 	{
 		Ar << BoostCorrection.Modifiers;  // AUTH
 		Ar << BoostServer.Modifiers;  // AUTH
+		Ar << SnareServer.Modifiers;
 	}
 
 	return !Ar.IsError();
@@ -61,6 +63,8 @@ void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Charac
 	BoostLocal.ClientFillNetworkMoveData(SavedMove.BoostLocal.WantsModifiers);
 	BoostCorrection.ClientFillNetworkMoveData(SavedMove.BoostCorrection.WantsModifiers, SavedMove.BoostCorrection.Modifiers);
 	BoostServer.ClientFillNetworkMoveData(SavedMove.BoostServer.Modifiers);
+	
+	SnareServer.ClientFillNetworkMoveData(SavedMove.SnareServer.Modifiers);
 	// WantsModifiers = SavedMove.WantsModifiers;
 	// Modifiers = SavedMove.Modifiers;  // AUTH
 }
@@ -80,6 +84,8 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 	Ar << BoostCorrection.WantsModifiers;
 	Ar << BoostCorrection.Modifiers;  // AUTH
 	Ar << BoostServer.Modifiers;  // AUTH
+	
+	Ar << SnareServer.Modifiers;
 	
 	// Ar << WantsModifiers;
 	// Ar << Modifiers;  // AUTH
@@ -123,8 +129,9 @@ UModifierMovement::UModifierMovement(const FObjectInitializer& ObjectInitializer
 	MaxAccelerationModified = 250.f;
 	MaxWalkSpeedModified = 250.f;
 
-	// Init Boost Levels
-	Boost.Add(FModifierTags::Modifier_Boost, { 1.50f });  // 1.5x Speed Boost
+	// Init Modifier Levels
+	Boost.Add(FModifierTags::Modifier_Boost, { 1.50f });  // 50% Speed Boost
+	Snare.Add(FModifierTags::Modifier_Snare, { 0.50f });  // 50% Speed Snare
 }
 
 bool UModifierMovement::HasValidData() const
@@ -157,38 +164,50 @@ EDataValidationResult UModifierMovement::IsDataValid(class FDataValidationContex
 			FText::FromString(GetName()), Boost.Num(), MaxBoostLevels));
 		return EDataValidationResult::Invalid;
 	}
+
+	const int32 MaxSnareLevels = SnareServer.BitSize;
+	if (Snare.Num() > MaxSnareLevels)
+	{
+		Context.AddError(FText::Format(
+			NSLOCTEXT("ModifierMovement", "SnareLevelsTooMany", "ModifierMovement {0} has {1} Snare Levels. Max is {2}."),
+			FText::FromString(GetName()), Snare.Num(), MaxSnareLevels));
+		return EDataValidationResult::Invalid;
+	}
+	
 	return Super::IsDataValid(Context);
 }
 #endif
 
 float UModifierMovement::GetMaxAcceleration() const
 {
-	return Super::GetMaxAcceleration() * GetBoostAccelScalar();
+	return Super::GetMaxAcceleration() * GetBoostAccelScalar() * GetSnareAccelScalar();
 }
 
 float UModifierMovement::GetMaxSpeed() const
 {
-	return Super::GetMaxSpeed() * GetBoostSpeedScalar();
+	return Super::GetMaxSpeed() * GetBoostSpeedScalar() * GetSnareSpeedScalar();
 }
 
 float UModifierMovement::GetMaxBrakingDeceleration() const
 {
-	return Super::GetMaxBrakingDeceleration() * GetBoostBrakingScalar();
+	return Super::GetMaxBrakingDeceleration() * GetBoostBrakingScalar() * GetSnareBrakingScalar();
 }
 
 float UModifierMovement::GetGroundFriction(float DefaultGroundFriction) const
 {
-	return GroundFriction * GetBoostGroundFrictionScalar();
+	return GroundFriction * GetBoostGroundFrictionScalar() * GetSnareGroundFrictionScalar();
 }
 
 float UModifierMovement::GetBrakingFriction() const
 {
-	return BrakingFriction * GetBoostBrakingFrictionScalar();
+	return BrakingFriction * GetBoostBrakingFrictionScalar() * GetSnareBrakingFrictionScalar();
 }
 
 float UModifierMovement::GetRootMotionTranslationScalar() const
 {
-	return BoostAffectsRootMotion() ? GetBoostSpeedScalar() : 1.f;
+	const float BoostScalar = BoostAffectsRootMotion() ? GetBoostSpeedScalar() : 1.f;
+	const float SnareScalar = SnareAffectsRootMotion() ? GetSnareSpeedScalar() : 1.f;
+	return BoostScalar * SnareScalar;
 }
 
 void UModifierMovement::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)
@@ -212,8 +231,12 @@ void UModifierMovement::ApplyVelocityBraking(float DeltaTime, float Friction, fl
 
 bool UModifierMovement::CanBoostInCurrentState() const
 {
-	return UpdatedComponent && !UpdatedComponent->IsSimulatingPhysics() &&
-		(IsFalling() || IsMovingOnGround());
+	return UpdatedComponent && !UpdatedComponent->IsSimulatingPhysics() && (IsFalling() || IsMovingOnGround());
+}
+
+bool UModifierMovement::CanSnareInCurrentState() const
+{
+	return UpdatedComponent && !UpdatedComponent->IsSimulatingPhysics() && (IsFalling() || IsMovingOnGround());
 }
 
 void UModifierMovement::UpdateModifierMovementState()
@@ -223,11 +246,9 @@ void UModifierMovement::UpdateModifierMovementState()
 		return;
 	}
 
-	// Initialize BoostLevels if empty
-	if (BoostLevels.Num() == 0 && Boost.Num() > 0)
-	{
-		for (const auto& Item : Boost) { BoostLevels.Add(Item.Key); }
-	}
+	// Initialize Modifier levels if empty
+	if (BoostLevels.Num() == 0)	{ for (const auto& Item : Boost) { BoostLevels.Add(Item.Key); } }
+	if (SnareLevels.Num() == 0)	{ for (const auto& Item : Snare) { SnareLevels.Add(Item.Key); } }
 
 	// Proxies get replicated Modifier state.
 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
@@ -237,13 +258,28 @@ void UModifierMovement::UpdateModifierMovementState()
 		{	// Boost
 			const FGameplayTag PrevBoostLevel = GetBoostLevel();
 			const uint8 PrevBoostLevelValue = BoostLevel;
-			if (FModifierStatics::ProcessModifiers<uint8, EModifierByte>(BoostLevel, BoostLevelMethod, BoostLevels, UINT8_MAX,
+			if (FModifierStatics::ProcessModifiers<uint8, EModifierByte, Mod_Local_Byte, Mod_LocalCorrection_Byte, Mod_Server_Byte>(
+				BoostLevel, BoostLevelMethod, BoostLevels, UINT8_MAX,
 				&BoostLocal, &BoostCorrection, &BoostServer,
 				[this]() { return CanBoostInCurrentState(); }))
 			{
 				ModifierCharacterOwner->NotifyModifierChanged(FModifierTags::Modifier_Boost,
 					GetBoostLevel(), PrevBoostLevel, BoostLevel,
 					PrevBoostLevelValue, UINT8_MAX);
+			}
+		}
+
+		{	// Snare
+			const FGameplayTag PrevSnareLevel = GetSnareLevel();
+			const uint8 PrevSnareLevelValue = SnareLevel;
+			if (FModifierStatics::ProcessModifiers<uint8, EModifierByte, Mod_Local_Byte, Mod_LocalCorrection_Byte, Mod_Server_Byte>(
+				SnareLevel, SnareLevelMethod, SnareLevels, UINT8_MAX,
+				nullptr, nullptr, &SnareServer,
+				[this]() { return CanSnareInCurrentState(); }))
+			{
+				ModifierCharacterOwner->NotifyModifierChanged(FModifierTags::Modifier_Snare,
+					GetSnareLevel(), PrevSnareLevel, SnareLevel,
+					PrevSnareLevelValue, UINT8_MAX);
 			}
 		}
 	}
@@ -312,6 +348,15 @@ bool UModifierMovement::ServerCheckClientError(float ClientTimeStamp, float Delt
 		return true;  // AUTH
 	}
 
+	// @TODO client auth for snare (have not confirmed we do it here, check first...)
+
+	// @TODO add client auth with params function that doesn't use preset tags/settings
+	
+	if (SnareServer.ServerCheckClientError(CurrentMoveData->SnareServer.Modifiers))
+	{
+		return true;
+	}
+
 	return false;
 }
 
@@ -334,6 +379,7 @@ void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_
 
 	BoostCorrection.OnClientCorrectionReceived(MoveResponse.BoostCorrection.Modifiers);
 	BoostServer.OnClientCorrectionReceived(MoveResponse.BoostServer.Modifiers);
+	SnareServer.OnClientCorrectionReceived(MoveResponse.SnareServer.Modifiers);
 	
 	Super::OnClientCorrectionReceived(ClientData, TimeStamp, NewLocation, NewVelocity, NewBase, NewBaseBoneName,
 		bHasBase, bBaseRelativePosition, ServerMovementMode, ServerGravityDirection);
@@ -424,6 +470,7 @@ void FSavedMove_Character_Modifier::Clear()
 	BoostLocal.Clear();
 	BoostCorrection.Clear();
 	BoostServer.Clear();
+	SnareServer.Clear();
 }
 
 void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel,
@@ -513,6 +560,7 @@ void FSavedMove_Character_Modifier::PostUpdate(ACharacter* C, EPostUpdateMode Po
 	{
 		BoostCorrection.PostUpdate(MoveComp->BoostCorrection.Data.Modifiers);  // AUTH
 		BoostServer.PostUpdate(MoveComp->BoostServer.Data.Modifiers);  // AUTH
+		SnareServer.PostUpdate(MoveComp->SnareServer.Data.Modifiers);
 		// Modifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->Modifiers);  // AUTH
 	}
 

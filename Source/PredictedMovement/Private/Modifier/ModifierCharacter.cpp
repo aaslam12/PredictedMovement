@@ -55,7 +55,10 @@ void AModifierCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	SharedParams.Condition = COND_SimulatedOnly;
 	
 	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, SimulatedBoost, SharedParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, SimulatedSnare, SharedParams);
 }
+
+/* Boost Implementation */
 
 void AModifierCharacter::OnRep_SimulatedBoost(uint8 PrevLevel)
 {
@@ -144,3 +147,61 @@ bool AModifierCharacter::ResetBoost(EModifierNetType NetType)
 	}
 	return false;
 }
+
+/* ~Boost Implementation */
+
+/* Snare Implementation */
+
+void AModifierCharacter::OnRep_SimulatedSnare(uint8 PrevLevel)
+{
+	if (ModifierMovement && SimulatedSnare != PrevLevel)
+	{
+		const FGameplayTag PrevSnareLevel = ModifierMovement->GetSnareLevel();
+		ModifierMovement->SnareLevel = SimulatedSnare;
+		NotifyModifierChanged(FModifierTags::Modifier_Snare, ModifierMovement->GetSnareLevel(),
+			PrevSnareLevel, ModifierMovement->SnareLevel, PrevLevel, UINT8_MAX);
+
+		ModifierMovement->bNetworkUpdateReceived = true;
+	}
+}
+
+bool AModifierCharacter::Snare(FGameplayTag Level)
+{
+	if (ModifierMovement && HasAuthority() && Level.IsValid())
+	{
+		const uint8 LevelIndex = ModifierMovement->GetSnareLevelIndex(Level);
+		if (LevelIndex == UINT8_MAX)
+		{
+			return false;
+		}
+		
+		return ModifierMovement->SnareServer.AddModifier(LevelIndex);
+	}
+	return false;
+}
+
+bool AModifierCharacter::UnSnare(FGameplayTag Level)
+{
+	if (ModifierMovement && HasAuthority() && Level.IsValid())
+	{
+		const uint8 LevelIndex = ModifierMovement->GetSnareLevelIndex(Level);
+		if (LevelIndex == UINT8_MAX)
+		{
+			return false;
+		}
+
+		return ModifierMovement->SnareServer.RemoveModifier(LevelIndex);
+	}
+	return false;
+}
+
+bool AModifierCharacter::ResetSnare()
+{
+	if (ModifierMovement && HasAuthority())
+	{
+		return ModifierMovement->SnareServer.ResetModifiers();
+	}
+	return false;
+}
+
+/* ~Snare Implementation */

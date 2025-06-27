@@ -10,6 +10,7 @@
 #include "Algo/MaxElement.h"
 #include "Algo/MinElement.h"
 
+
 template <typename T>
 struct TIsValidModifierEnum : std::false_type {};
 

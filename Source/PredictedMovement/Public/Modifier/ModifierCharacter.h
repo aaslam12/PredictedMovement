@@ -59,6 +59,8 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 public:
+	/* Boost Implementation */
+	
 	/** Set by character movement to specify that this Character is currently Modified. */
 	UPROPERTY(ReplicatedUsing=OnRep_SimulatedBoost)
 	uint8 SimulatedBoost = 0;
@@ -87,4 +89,40 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category=Character)
 	virtual bool ResetBoost(EModifierNetType NetType);
+
+	/* ~Boost Implementation */
+
+public:
+	/* Snare Implementation */
+	
+	/** Set by character movement to specify that this Character is currently Modified. */
+	UPROPERTY(ReplicatedUsing=OnRep_SimulatedSnare)
+	uint8 SimulatedSnare = 0;
+
+	/** Handle Crouching replicated from server */
+	UFUNCTION()
+	virtual void OnRep_SimulatedSnare(uint8 PrevLevel);
+
+	/**
+	 * Request the character to start Modified. The request is processed on the next update of the CharacterMovementComponent.
+	 * @see OnStartModifier
+	 * @see IsModified
+	 * @see CharacterMovement->WantsToModifier
+	 */
+	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Snare"))
+	virtual bool Snare(FGameplayTag Level);
+
+	/**
+	 * Request the character to stop Modified. The request is processed on the next update of the CharacterMovementComponent.
+	 * @see OnEndModifier
+	 * @see IsModified
+	 * @see CharacterMovement->WantsToModifier
+	 */
+	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Snare"))
+	virtual bool UnSnare(FGameplayTag Level);
+
+	UFUNCTION(BlueprintCallable, Category=Character)
+	virtual bool ResetSnare();
+
+	/* ~Snare Implementation */
 };
