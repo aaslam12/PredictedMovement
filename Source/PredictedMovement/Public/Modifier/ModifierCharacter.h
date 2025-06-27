@@ -61,11 +61,11 @@ public:
 public:
 	/* Boost Implementation */
 	
-	/** Set by character movement to specify that this Character is currently Modified. */
+	/** Set by character movement to specify that this Character's Boost level. */
 	UPROPERTY(ReplicatedUsing=OnRep_SimulatedBoost)
 	uint8 SimulatedBoost = 0;
 
-	/** Handle Crouching replicated from server */
+	/** Handle Boost replicated from server */
 	UFUNCTION()
 	virtual void OnRep_SimulatedBoost(uint8 PrevLevel);
 
@@ -86,6 +86,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Boost"))
 	virtual bool UnBoost(FGameplayTag Level, EModifierNetType NetType, bool bRemoveAll=false);
 
+	/** Reset the Boost for the specified NetType, removing all Boosts of that type. */
 	UFUNCTION(BlueprintCallable, Category=Character)
 	virtual bool ResetBoost(EModifierNetType NetType);
 
@@ -94,11 +95,11 @@ public:
 public:
 	/* Snare Implementation */
 	
-	/** Set by character movement to specify that this Character is currently Modified. */
+	/** Set by character movement to specify that this Character's Snare level. */
 	UPROPERTY(ReplicatedUsing=OnRep_SimulatedSnare)
 	uint8 SimulatedSnare = 0;
 
-	/** Handle Crouching replicated from server */
+	/** Handle Snare replicated from server */
 	UFUNCTION()
 	virtual void OnRep_SimulatedSnare(uint8 PrevLevel);
 
@@ -120,8 +121,43 @@ public:
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.Snare"))
 	virtual bool UnSnare(FGameplayTag Level, bool bRemoveAll=false);
 
+	/** Reset the Snare for the specified NetType, removing all Snares of that type. */
 	UFUNCTION(BlueprintCallable, Category=Character)
 	virtual bool ResetSnare();
 
 	/* ~Snare Implementation */
+
+public:
+	/* SlowFall Implementation */
+	
+	/** Set by character movement to specify that this Character's SlowFall level. */
+	UPROPERTY(ReplicatedUsing=OnRep_SimulatedSlowFall)
+	uint8 SimulatedSlowFall = 0;
+
+	/** Handle SlowFall replicated from server */
+	UFUNCTION()
+	virtual void OnRep_SimulatedSlowFall(uint8 PrevLevel);
+
+	/**
+	 * Request the character to start SlowFall. The request is processed on the next update of the CharacterMovementComponent.
+	 * @param Level The level of the SlowFall to remove.
+	 * @param NetType How the SlowFall is applied, either locally predicted, with correction, or server initiated.
+	 */
+	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.SlowFall"))
+	virtual bool SlowFall(FGameplayTag Level);
+
+	/**
+	 * Request the character to stop SlowFall. The request is processed on the next update of the CharacterMovementComponent.
+	 * @param Level The level of the SlowFall to remove.
+	 * @param NetType How the SlowFall is applied, either locally predicted, with correction, or server initiated.
+	 * @param bRemoveAll If true, removes all SlowFalls of the specified level, otherwise only removes the first one found.
+	 */
+	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.SlowFall"))
+	virtual bool UnSlowFall(FGameplayTag Level, bool bRemoveAll=false);
+
+	/** Reset the SlowFall for the specified NetType, removing all SlowFalls of that type. */
+	UFUNCTION(BlueprintCallable, Category=Character)
+	virtual bool ResetSlowFall();
+
+	/* ~SlowFall Implementation */
 };

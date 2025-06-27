@@ -30,6 +30,13 @@ void AModifierCharacter::OnModifierChanged(const FGameplayTag& ModifierType, con
 void AModifierCharacter::OnModifierAdded(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
 	const FGameplayTag& PrevModifierLevel)
 {
+	if (ModifierMovement)
+	{
+		if (ModifierType == FModifierTags::Modifier_SlowFall)
+		{
+			ModifierMovement->OnStartSlowFall();
+		}
+	}
 	K2_OnModifierAdded(ModifierType, ModifierLevel, PrevModifierLevel);
 }
 
@@ -56,6 +63,7 @@ void AModifierCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	
 	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, SimulatedBoost, SharedParams);
 	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, SimulatedSnare, SharedParams);
+	DOREPLIFETIME_WITH_PARAMS_FAST(ThisClass, SimulatedSlowFall, SharedParams);
 }
 
 /* Boost Implementation */
@@ -205,3 +213,59 @@ bool AModifierCharacter::ResetSnare()
 }
 
 /* ~Snare Implementation */
+
+/* SlowFall Implementation */
+
+void AModifierCharacter::OnRep_SimulatedSlowFall(uint8 PrevLevel)
+{
+	if (ModifierMovement && SimulatedSlowFall != PrevLevel)
+	{
+		const FGameplayTag PrevSlowFallLevel = ModifierMovement->GetSlowFallLevel();
+		ModifierMovement->SlowFallLevel = SimulatedSlowFall;
+		NotifyModifierChanged(FModifierTags::Modifier_SlowFall, ModifierMovement->GetSlowFallLevel(),
+			PrevSlowFallLevel, ModifierMovement->SlowFallLevel, PrevLevel, UINT8_MAX);
+
+		ModifierMovement->bNetworkUpdateReceived = true;
+	}
+}
+
+bool AModifierCharacter::SlowFall(FGameplayTag Level)
+{
+	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy && Level.IsValid())
+	{
+		const uint8 LevelIndex = ModifierMovement->GetSlowFallLevelIndex(Level);
+		if (LevelIndex == UINT8_MAX)
+		{
+			return false;
+		}
+		
+		return ModifierMovement->SlowFallLocal.AddModifier(LevelIndex);
+	}
+	return false;
+}
+
+bool AModifierCharacter::UnSlowFall(FGameplayTag Level, bool bRemoveAll)
+{
+	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy && Level.IsValid())
+	{
+		const uint8 LevelIndex = ModifierMovement->GetSlowFallLevelIndex(Level);
+		if (LevelIndex == UINT8_MAX)
+		{
+			return false;
+		}
+		
+		return ModifierMovement->SlowFallLocal.RemoveModifier(LevelIndex, bRemoveAll);
+	}
+	return false;
+}
+
+bool AModifierCharacter::ResetSlowFall()
+{
+	if (ModifierMovement && GetLocalRole() != ROLE_SimulatedProxy)
+	{
+		return ModifierMovement->SlowFallLocal.ResetModifiers();
+	}
+	return false;
+}
+
+/* ~SlowFall Implementation */

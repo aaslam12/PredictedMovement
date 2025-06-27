@@ -41,6 +41,7 @@ public:
 	FModifierMoveData_WithCorrection BoostCorrection;
 	FModifierMoveData_ServerInitiated BoostServer;
 	FModifierMoveData_ServerInitiated SnareServer;
+	FModifierMoveData_LocalPredicted SlowFallLocal;
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -77,9 +78,8 @@ private:
 
 public:
 	/**
-	 * Boost increases movement speed and acceleration
+	 * Boost modifies movement properties such as speed and acceleration
 	 * Scaling applied on a per-Boost-level basis
-	 * Every tag defined here must also be defined in the FModifierData Boost property
 	 */
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
 	TMap<FGameplayTag, FMovementModifierParams> Boost;
@@ -102,7 +102,7 @@ public:
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin=1, UIMin=1, UIMax=32, EditCondition="bLimitMaxBoosts"))
 	int32 MaxBoosts = 8;
 
-	/** Indexed list of Boost levels, used to determine the current Boost level */
+	/** Indexed list of Boost levels, used to determine the current Boost level based on index */
 	UPROPERTY()
 	TArray<FGameplayTag> BoostLevels;
 
@@ -110,16 +110,19 @@ public:
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
 	EModifierLevelMethod BoostLevelMethod;
 	
-	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
+	/** Local Predicted Boost based on Player Input */
 	TMod_Local BoostLocal;
+
+	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
 	TMod_LocalCorrection BoostCorrection;
+
+	/** Server Initiated Boost that is sent to the Client via a correction */
 	TMod_Server BoostServer;
 
 public:
 	/**
-	 * Snare increases movement speed and acceleration
+	 * Snare modifies movement properties such as speed and acceleration
 	 * Scaling applied on a per-Snare-level basis
-	 * Every tag defined here must also be defined in the FModifierData Snare property
 	 */
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
 	TMap<FGameplayTag, FMovementModifierParams> Snare;
@@ -140,17 +143,54 @@ public:
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin=1, UIMin=1, UIMax=32, EditCondition="bLimitMaxSnares"))
 	int32 MaxSnares = 8;
 
-	/** Indexed list of Snare levels, used to determine the current Snare level */
+	/** Indexed list of Snare levels, used to determine the current Snare level based on index */
 	UPROPERTY()
 	TArray<FGameplayTag> SnareLevels;
 
 	/** The method used to calculate Snare levels */
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
 	EModifierLevelMethod SnareLevelMethod;
-	
-	/** Local Predicted Snare based on Player Input, that can be corrected by the server when a mismatch occurs */
+
+	/** Server Initiated Snare that is sent to the Client via a correction */
 	TMod_Server SnareServer;
 
+public:
+	/**
+	 * SlowFall changes falling properties, such as gravity and air control
+	 * Scaling applied on a per-SlowFall-level basis
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
+	TMap<FGameplayTag, FFallingModifierParams> SlowFall;
+
+	/**
+	 * Limits the maximum number of SlowFall levels that can be applied to the character
+	 * This value is shared between each type of SlowFall
+	 * It limits both the number being serialized and sent over the network, as well as having gameplay implications
+	 * Priority is granted in order, because modifiers consume the remaining slots, so LocalPredicted -> WithCorrection - ServerInitiated
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(InlineEditConditionToggle))
+	bool bLimitMaxSlowFalls = true;
+	
+	/**
+	 * Maximum number of SlowFall levels that can be applied to the character
+	 * This value is shared between each type of SlowFall
+	 * It limits both the number being serialized and sent over the network, as well as having gameplay implications
+	 * Priority is granted in order, because modifiers consume the remaining slots, so LocalPredicted -> WithCorrection - ServerInitiated
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin=1, UIMin=1, UIMax=32, EditCondition="bLimitMaxSlowFalls"))
+	int32 MaxSlowFalls = 8;
+
+	/** Indexed list of SlowFall levels, used to determine the current SlowFall level */
+	UPROPERTY()
+	TArray<FGameplayTag> SlowFallLevels;
+
+	/** The method used to calculate SlowFall levels */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
+	EModifierLevelMethod SlowFallLevelMethod;
+
+	/** Local Predicted SlowFall based on Player Input */
+	TMod_Local SlowFallLocal;
+	
 public:
 	/** Client auth parameters mapped to a source gameplay tag */
 	UPROPERTY(Category="Character Movement (Networking)", EditAnywhere, BlueprintReadOnly)
@@ -177,6 +217,9 @@ public:
 	virtual float GetBrakingFriction() const;
 	virtual float GetRootMotionTranslationScalar() const;
 	
+	virtual float GetGravityZ() const override;
+	virtual FVector GetAirControl(float DeltaTime, float TickAirControl, const FVector& FallAcceleration) override;
+	
 	virtual void CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration) override;
 	virtual void ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration) override;
 
@@ -184,6 +227,7 @@ public:
 	/* Boost Implementation */
 
 	uint8 BoostLevel = UINT8_MAX;
+	bool IsBoostActive() const { return BoostLevel != UINT8_MAX; }
 	const FMovementModifierParams* GetBoostParams() const { return Boost.Find(GetBoostLevel()); }
 	FGameplayTag GetBoostLevel() const { return BoostLevels.IsValidIndex(BoostLevel) ? BoostLevels[BoostLevel] : FGameplayTag::EmptyTag; }
 	uint8 GetBoostLevelIndex(const FGameplayTag& Level) const { return BoostLevels.IndexOfByKey(Level) > INDEX_NONE ? BoostLevels.IndexOfByKey(Level) : UINT8_MAX; }
@@ -202,6 +246,7 @@ public:
 	/* Snare Implementation */
 
 	uint8 SnareLevel = UINT8_MAX;
+	bool IsSnareActive() const { return SnareLevel != UINT8_MAX; }
 	const FMovementModifierParams* GetSnareParams() const { return Snare.Find(GetSnareLevel()); }
 	FGameplayTag GetSnareLevel() const { return SnareLevels.IsValidIndex(SnareLevel) ? SnareLevels[SnareLevel] : FGameplayTag::EmptyTag; }
 	uint8 GetSnareLevelIndex(const FGameplayTag& Level) const { return SnareLevels.IndexOfByKey(Level) > INDEX_NONE ? SnareLevels.IndexOfByKey(Level) : UINT8_MAX; }
@@ -217,7 +262,24 @@ public:
 	/* ~Snare Implementation */
 
 public:
-	void UpdateModifierMovementState();
+	/* SlowFall Implementation */
+
+	uint8 SlowFallLevel = UINT8_MAX;
+	bool IsSlowFallActive() const { return SlowFallLevel != UINT8_MAX; }
+	const FFallingModifierParams* GetSlowFallParams() const { return SlowFall.Find(GetSlowFallLevel()); }
+	FGameplayTag GetSlowFallLevel() const { return SlowFallLevels.IsValidIndex(SlowFallLevel) ? SlowFallLevels[SlowFallLevel] : FGameplayTag::EmptyTag; }
+	uint8 GetSlowFallLevelIndex(const FGameplayTag& Level) const { return SlowFallLevels.IndexOfByKey(Level) > INDEX_NONE ? SlowFallLevels.IndexOfByKey(Level) : UINT8_MAX; }
+	virtual bool CanSlowFallInCurrentState() const;
+
+	virtual void OnStartSlowFall();
+
+	virtual float GetSlowFallGravityZScalar() const { return GetSlowFallParams() ? GetSlowFallParams()->GetGravityScalar(Velocity) : 1.f; }
+
+	/* ~SlowFall Implementation */
+
+public:
+	virtual void ProcessModifierMovementState();
+	virtual void UpdateModifierMovementState();
 
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
 	virtual void UpdateCharacterStateAfterMovement(float DeltaSeconds) override;
@@ -303,6 +365,12 @@ public:
 	FModifierSavedMove_ServerInitiated BoostServer;
 	
 	FModifierSavedMove_ServerInitiated SnareServer;
+
+	FModifierSavedMove SlowFallLocal;
+
+	uint8 BoostLevel = UINT8_MAX;
+	uint8 SnareLevel = UINT8_MAX;
+	uint8 SlowFallLevel = UINT8_MAX;
 	
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;

@@ -35,6 +35,8 @@ UModifierMovement::UModifierMovement(const FObjectInitializer& ObjectInitializer
 	Boost.Add(FModifierTags::Modifier_Boost, { 1.50f });  // 50% Speed Boost
 	Snare.Add(FModifierTags::Modifier_Snare, { 0.50f });  // 50% Speed Snare
 
+	SlowFall.Add(FModifierTags::Modifier_SlowFall, { 0.1f });  // 90% Gravity Reduction
+
 	// Auth params for Snare
 	static constexpr int32 DefaultPriority = 5;
 	ClientAuthParams.FindOrAdd(FModifierTags::ClientAuth_Snare, { DefaultPriority });
@@ -91,6 +93,8 @@ void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Charac
 	BoostServer.ClientFillNetworkMoveData(SavedMove.BoostServer.Modifiers);
 	
 	SnareServer.ClientFillNetworkMoveData(SavedMove.SnareServer.Modifiers);
+
+	SlowFallLocal.ClientFillNetworkMoveData(SavedMove.SlowFallLocal.WantsModifiers);
 }
 
 bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar,
@@ -103,48 +107,8 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 	BoostServer.Serialize(Ar, TEXT("BoostServer"));
 
 	SnareServer.Serialize(Ar, TEXT("SnareServer"));
-	
-	// Ar << BoostLocal.WantsModifiers;
-	// Ar << BoostCorrection.WantsModifiers;
-	// Ar << BoostCorrection.Modifiers;
-	// Ar << BoostServer.Modifiers;
-	
-	// Ar << SnareServer.Modifiers;
-	
-	// constexpr uint8 MaxModifiers = 8;
-	// if (MaxModifiers <= 1)
-	// {
-	// 	return !Ar.IsError();
-	// }
 
-	// Ar << WantsModifiers;
-	// Ar << Modifiers;
-	
-	// // Serialize the number of elements
-	// uint8 NumModifiers = WantsModifiers.Num();
-	// if (Ar.IsSaving())
-	// {
-	// 	NumModifiers = FMath::Min(MaxModifiers, NumModifiers);
-	// }
-	// Ar << NumModifiers;
-	//
-	// // Resize the array if needed
-	// if (Ar.IsLoading())
-	// {
-	// 	const FName ModifierType = TEXT("DebugType");  // @TODO
-	// 	if (!ensureMsgf(NumModifiers <= MaxModifiers,
-	// 		TEXT("Deserializing modifier %s array with %d elements when max is %d -- Check packet serialization logic"), *ModifierType.ToString(), NumModifiers, MaxModifiers))
-	// 	{
-	// 		NumModifiers = MaxModifiers;
-	// 	}
-	// 	WantsModifiers.SetNum(NumModifiers);
-	// }
-	//
-	// // Serialize the elements
-	// for (uint8 i = 0; i < NumModifiers; ++i)
-	// {
-	// 	Ar << WantsModifiers[i];
-	// }
+	SlowFallLocal.Serialize(Ar, TEXT("SlowFallLocal"));
 
 	return !Ar.IsError();
 }
@@ -200,6 +164,21 @@ float UModifierMovement::GetRootMotionTranslationScalar() const
 	return BoostScalar * SnareScalar;
 }
 
+float UModifierMovement::GetGravityZ() const
+{
+	return Super::GetGravityZ() * GetSlowFallGravityZScalar();
+}
+
+FVector UModifierMovement::GetAirControl(float DeltaTime, float TickAirControl, const FVector& FallAcceleration)
+{
+	if (const FFallingModifierParams* SlowFallParams = GetSlowFallParams())
+	{
+		TickAirControl = SlowFallParams->GetAirControl(TickAirControl);
+	}
+	
+	return Super::GetAirControl(DeltaTime, TickAirControl, FallAcceleration);
+}
+
 void UModifierMovement::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)
 {
 	if (IsMovingOnGround())
@@ -229,17 +208,23 @@ bool UModifierMovement::CanSnareInCurrentState() const
 	return UpdatedComponent && !UpdatedComponent->IsSimulatingPhysics() && (IsFalling() || IsMovingOnGround());
 }
 
-void UModifierMovement::UpdateModifierMovementState()
+bool UModifierMovement::CanSlowFallInCurrentState() const
 {
-	if (!HasValidData())
+	return UpdatedComponent && !UpdatedComponent->IsSimulatingPhysics() && (IsFalling() || IsMovingOnGround());
+}
+
+void UModifierMovement::OnStartSlowFall()
+{
+	if (!HasValidData() || CharacterOwner->GetLocalRole() == ROLE_SimulatedProxy)
 	{
 		return;
 	}
+	
 
-	// Initialize Modifier levels if empty
-	if (BoostLevels.Num() == 0)	{ for (const auto& Item : Boost) { BoostLevels.Add(Item.Key); } }
-	if (SnareLevels.Num() == 0)	{ for (const auto& Item : Snare) { SnareLevels.Add(Item.Key); } }
+}
 
+void UModifierMovement::ProcessModifierMovementState()
+{
 	// Proxies get replicated Modifier state.
 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
 	{
@@ -272,12 +257,59 @@ void UModifierMovement::UpdateModifierMovementState()
 					PrevSnareLevelValue, UINT8_MAX);
 			}
 		}
+
+		{	// SlowFall
+			const FGameplayTag PrevSlowFallLevel = GetSlowFallLevel();
+			const uint8 PrevSlowFallLevelValue = SlowFallLevel;
+			if (FModifierStatics::ProcessModifiers<TMod_Local, TMod_LocalCorrection, TMod_Server>(
+				SlowFallLevel, SlowFallLevelMethod, SlowFallLevels, bLimitMaxSlowFalls, MaxSlowFalls, UINT8_MAX,
+				&SlowFallLocal, nullptr, nullptr,
+				[this] { return CanSlowFallInCurrentState(); }))
+			{
+				ModifierCharacterOwner->NotifyModifierChanged(FModifierTags::Modifier_SlowFall,
+					GetSlowFallLevel(), PrevSlowFallLevel, SlowFallLevel,
+					PrevSlowFallLevelValue, UINT8_MAX);
+			}
+		}
 	}
+}
+
+void UModifierMovement::UpdateModifierMovementState()
+{
+	if (!HasValidData())
+	{
+		return;
+	}
+
+	// Initialize Modifier levels if empty
+	if (BoostLevels.Num() == 0)	{ for (const auto& Level : Boost) { BoostLevels.Add(Level.Key); } }
+	if (SnareLevels.Num() == 0)	{ for (const auto& Level : Snare) { SnareLevels.Add(Level.Key); } }
+	if (SlowFallLevels.Num() == 0) { for (const auto& Level : SlowFall) { SlowFallLevels.Add(Level.Key); } }
+
+	// Update the modifiers
+	ProcessModifierMovementState();
 }
 
 void UModifierMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 {
+	if (!HasValidData())
+	{
+		return;
+	}
+	
+	const bool bWasSlowFalling = IsSlowFallActive();
 	UpdateModifierMovementState();
+
+	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy && !bWasSlowFalling && IsSlowFallActive())
+	{
+		if (const FFallingModifierParams* SlowFallParams = GetSlowFallParams())
+		{
+			if (SlowFallParams->bRemoveVelocityZOnStart)
+			{
+				Velocity.Z = 0.f;
+			}
+		}
+	}
 
 	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
 }
@@ -458,6 +490,8 @@ void UModifierMovement::ServerMove_PerformMovement(const FCharacterNetworkMoveDa
 	BoostLocal.ServerMove_PerformMovement(ModifierMoveData.BoostLocal.WantsModifiers);
 	BoostCorrection.ServerMove_PerformMovement(ModifierMoveData.BoostCorrection.WantsModifiers);
 
+	SlowFallLocal.ServerMove_PerformMovement(ModifierMoveData.SlowFallLocal.WantsModifiers);
+
 	Super::ServerMove_PerformMovement(MoveData);
 }
 
@@ -486,10 +520,6 @@ bool UModifierMovement::ServerCheckClientError(float ClientTimeStamp, float Delt
 		return true;
 	}
 
-	// @TODO client auth for snare (have not confirmed we do it here, check first...)
-
-	// @TODO add client auth with params function that doesn't use preset tags/settings
-	
 	if (SnareServer.ServerCheckClientError(CurrentMoveData->SnareServer.Modifiers))
 	{
 		return true;
@@ -557,13 +587,17 @@ void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_
 
 bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 {
-	const TArray RealBoostLocal = BoostLocal.Data.WantsModifiers;
-	const TArray RealBoostCorrection = BoostCorrection.Data.WantsModifiers;
+	const TModifierStack RealBoostLocal = BoostLocal.Data.WantsModifiers;
+	const TModifierStack RealBoostCorrection = BoostCorrection.Data.WantsModifiers;
+
+	const TModifierStack RealSlowFallLocal = SlowFallLocal.Data.WantsModifiers;
 	
 	const bool bResult = Super::ClientUpdatePositionAfterServerUpdate();
 	
 	BoostLocal.Data.WantsModifiers = RealBoostLocal;
 	BoostCorrection.Data.WantsModifiers = RealBoostCorrection;
+
+	SlowFallLocal.Data.WantsModifiers = RealSlowFallLocal;
 
 	return bResult;
 }
@@ -634,6 +668,7 @@ void FSavedMove_Character_Modifier::Clear()
 	BoostCorrection.Clear();
 	BoostServer.Clear();
 	SnareServer.Clear();
+	SlowFallLocal.Clear();
 }
 
 void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel,
@@ -647,6 +682,8 @@ void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime,
 	{
 		BoostLocal.SetMoveFor(MoveComp->BoostLocal.Data.WantsModifiers);
 		BoostCorrection.SetMoveFor(MoveComp->BoostCorrection.Data.WantsModifiers);
+
+		SlowFallLocal.SetMoveFor(MoveComp->SlowFallLocal.Data.WantsModifiers);
 	}
 }
 
@@ -674,6 +711,13 @@ bool FSavedMove_Character_Modifier::CanCombineWith(const FSavedMovePtr& NewMove,
 
 	if (!BoostLocal.CanCombineWith(SavedMove->BoostLocal.WantsModifiers)) { return false; }
 	if (!BoostCorrection.CanCombineWith(SavedMove->BoostCorrection.WantsModifiers)) { return false; }
+
+	if (!SlowFallLocal.CanCombineWith(SavedMove->SlowFallLocal.WantsModifiers)) { return false; }
+
+	// Without these, the change/start/stop events will trigger twice causing de-sync, so we don't combine moves if the level changes
+	if (BoostLevel != SavedMove->BoostLevel) { return false; }
+	if (SnareLevel != SavedMove->SnareLevel) { return false; }
+	if (SlowFallLevel != SavedMove->SlowFallLevel) { return false; }
 	
 	return FSavedMove_Character::CanCombineWith(NewMove, InCharacter, MaxDelta);
 }
@@ -690,6 +734,12 @@ void FSavedMove_Character_Modifier::SetInitialPosition(ACharacter* C)
 	{
 		BoostLocal.SetInitialPosition(MoveComp->BoostLocal.Data.WantsModifiers);
 		BoostCorrection.SetInitialPosition(MoveComp->BoostCorrection.Data.WantsModifiers);
+
+		SlowFallLocal.SetInitialPosition(MoveComp->SlowFallLocal.Data.WantsModifiers);
+
+		BoostLevel = MoveComp->BoostLevel;
+		SnareLevel = MoveComp->SnareLevel;
+		SlowFallLevel = MoveComp->SlowFallLevel;
 	}
 }
 
@@ -704,6 +754,12 @@ void FSavedMove_Character_Modifier::CombineWith(const FSavedMove_Character* OldM
 	{
 		MoveComp->BoostLocal.CombineWith(SavedOldMove->BoostLocal.WantsModifiers);
 		MoveComp->BoostCorrection.CombineWith(SavedOldMove->BoostCorrection.WantsModifiers);
+
+		MoveComp->SlowFallLocal.CombineWith(SavedOldMove->SlowFallLocal.WantsModifiers);
+
+		MoveComp->BoostLevel = SavedOldMove->BoostLevel;
+		MoveComp->SnareLevel = SavedOldMove->SnareLevel;
+		MoveComp->SlowFallLevel = SavedOldMove->SlowFallLevel;
 	}
 }
 
@@ -715,6 +771,8 @@ void FSavedMove_Character_Modifier::PostUpdate(ACharacter* C, EPostUpdateMode Po
 		BoostCorrection.PostUpdate(MoveComp->BoostCorrection.Data.Modifiers);
 		BoostServer.PostUpdate(MoveComp->BoostServer.Data.Modifiers);
 		SnareServer.PostUpdate(MoveComp->SnareServer.Data.Modifiers);
+
+		// if (PostUpdateMode == PostUpdate_Record)
 	}
 
 	Super::PostUpdate(C, PostUpdateMode);
@@ -726,15 +784,9 @@ bool FSavedMove_Character_Modifier::IsImportantMove(const FSavedMovePtr& LastAck
 	
 	const TSharedPtr<FSavedMove_Character_Modifier>& SavedMove = StaticCastSharedPtr<FSavedMove_Character_Modifier>(LastAckedMove);
 
-	if (BoostLocal.IsImportantMove(SavedMove->BoostLocal.WantsModifiers))
-	{
-		return true;
-	}
-
-	if (BoostCorrection.IsImportantMove(SavedMove->BoostCorrection.WantsModifiers))
-	{
-		return true;
-	}
+	if (BoostLocal.IsImportantMove(SavedMove->BoostLocal.WantsModifiers)) { return true; }
+	if (BoostCorrection.IsImportantMove(SavedMove->BoostCorrection.WantsModifiers))	{ return true; }
+	if (SlowFallLocal.IsImportantMove(SavedMove->SlowFallLocal.WantsModifiers)) { return true; }
 	
 	return Super::IsImportantMove(LastAckedMove);
 }
