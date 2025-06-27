@@ -18,6 +18,7 @@ struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMove
 
 	// uint8 Modifiers;  // AUTH
 	FModifierMoveResponse<uint8, EModifierByte> BoostCorrection;
+	FModifierMoveResponse<uint8, EModifierByte> BoostServer;
 
 	virtual void ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement, const FClientAdjustment& PendingAdjustment) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap) override;
@@ -37,6 +38,7 @@ public:
 	// uint8 Modifiers;  // AUTH
 
 	FModifierMoveData_WithCorrection<uint8> BoostCorrection;
+	FModifierMoveData_ServerInitiated<uint8> BoostServer;  // Server needs to compare between client and server to know whether to send a correction or not
 	
 	virtual void ClientFillNetworkMoveData(const FSavedMove_Character& ClientMove, ENetworkMoveType MoveType) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap, ENetworkMoveType MoveType) override;
@@ -92,7 +94,6 @@ public:
 	virtual bool HasValidData() const override;
 	virtual void PostLoad() override;
 	virtual void SetUpdatedComponent(USceneComponent* NewUpdatedComponent) override;
-	virtual void BeginPlay() override;
 
 public:
 	virtual float GetMaxAcceleration() const override;
@@ -105,21 +106,12 @@ public:
 public:
 	/* BOOST Implementation */
 
-	virtual uint8 GetBoostLevel() const { return BoostCorrection.GetModifierLevel(); }
+	virtual uint8 GetBoostLevel() const { return BoostCorrection.GetModifierLevel() + BoostServer.GetModifierLevel(); }
 	virtual bool CanBoostInCurrentState() const;
-	virtual TArray<EModifierByte> GetBoostModifiersForCurrentState() const;
 	
 	/* ~BOOST Implementation */
 	
 public:
-
-	/**
-	 * Call CharacterOwner->OnStartModifier() if successful.
-	 * In general you should set WantsModifierLevel instead to have the Modifier persist during movement, or just use the Modifier functions on the owning Character.
-	 * @param	bClientSimulation	true when called when bIsModifiered is replicated to non owned clients.
-	 */
-	virtual void ChangeModifiers(const TArray<EModifierByte>& NewModifiers, bool bClientSimulation = false, uint8 PrevSimulatedLevel = 0);
-
 	void UpdateModifierMovementState();
 
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
@@ -170,7 +162,8 @@ public:
 	// uint8 Modifiers;  // AUTH
 
 	FModifierSavedMove_WithCorrection<uint8, EModifierByte> BoostCorrection;
-		
+	FModifierSavedMove_ServerInitiated<uint8, EModifierByte> BoostServer;
+	
 	/** Clear saved move properties, so it can be re-used. */
 	virtual void Clear() override;
 

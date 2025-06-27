@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameplayTagContainer.h"
 #include "ModifierCompression.h"
 
 
@@ -101,6 +100,34 @@ struct PREDICTEDMOVEMENT_API FModifierSavedMove_WithCorrection final : FModifier
 	}
 };
 
+/**
+ * FSavedMove_Character
+ */
+template <typename T, typename TEnum>
+struct PREDICTEDMOVEMENT_API FModifierSavedMove_ServerInitiated
+{
+	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
+				  "FModifierSavedMove only supports uint8, uint16, or uint32 as T.");
+
+	static_assert(TIsValidModifierEnum<TEnum>::value,
+		"FModifierSavedMove only supports EModifierByte, EModifierShort, or EModifierLong as TEnum.");
+	
+	T Modifiers;
+
+	FModifierSavedMove_ServerInitiated()
+		: Modifiers(0)
+	{}
+
+	void Clear()
+	{
+		Modifiers = 0;
+	}
+
+	void PostUpdate(TArray<TEnum> InModifiers)
+	{
+		Modifiers = FModifierCompression::GetBitmaskFromModifiers(InModifiers);
+	}
+};
 
 /**
  * FCharacterMoveResponseDataContainer
@@ -172,11 +199,38 @@ struct PREDICTEDMOVEMENT_API FModifierMoveData_WithCorrection final : FModifierM
 };
 
 /**
+ * FCharacterNetworkMoveData
+ */
+template <typename T>
+struct PREDICTEDMOVEMENT_API FModifierMoveData_ServerInitiated
+{
+	static_assert(std::is_same_v<T, uint8> || std::is_same_v<T, uint16> || std::is_same_v<T, uint32>,
+				  "FModifierMoveData only supports uint8, uint16, or uint32 as T.");
+
+	FModifierMoveData_ServerInitiated()
+		: Modifiers(0)
+	{}
+	
+	T Modifiers;
+
+	void ClientFillNetworkMoveData(uint8 InModifiers)
+	{
+		Modifiers = InModifiers;
+	}
+};
+
+/**
  * Represents a single modifier that can be applied to a character
  */
 template <typename TEnum>
-struct PREDICTEDMOVEMENT_API FMovementModifierBaseData
+struct PREDICTEDMOVEMENT_API FMovementModifierData
 {
+	/**
+	 * The requested input state, which requests modifiers of the specified level
+	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
+	 */
+	TArray<TEnum> WantsModifiers;
+	
 	/**
 	 * The actual state, which represents the actual modifiers applied to the character
 	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
@@ -186,59 +240,19 @@ struct PREDICTEDMOVEMENT_API FMovementModifierBaseData
 
 /**
  * Represents a single modifier that can be applied to a character
- */
-template <typename TEnum>
-struct PREDICTEDMOVEMENT_API FMovementModifierData_LocalPredicted final : FMovementModifierBaseData<TEnum>
-{
-	/**
-	 * The requested input state, which requests modifiers of the specified level
-	 * uint8 allows 8 modifiers, uint16 allows 16 modifiers, uint32 allows 32 modifiers, and uint64 allows 64 modifiers.
-	 */
-	TArray<TEnum> WantsModifiers;
-};
-
-/**
- * Represents a single modifier that can be applied to a character
- */
-template <typename T, typename TEnum>
-struct PREDICTEDMOVEMENT_API FMovementModifierBase
-{
-	/** The type of modifier this struct contains data for */
-	FGameplayTag ModifierType = FGameplayTag::EmptyTag;
-	
-	bool bHasInitialized = false;
-};
-
-/**
- * Represents a single modifier that can be applied to a character
  * Local Predicted modifier is activated via player input and is predicted on the client
  * e.g. Sprint, Crouch, etc.
  */
 template <typename T, typename TEnum>
-struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted : FMovementModifierBase<T, TEnum>
+struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted
 {
-	void Init(const FGameplayTag& InModifierType)
-	{
-		this->bHasInitialized = true;
-		this->ModifierType = InModifierType;
-
-		// @TODO if (ensureAlwaysMsgf(ModifierLevelTags.Num() > 0, TEXT("Modifier %s has no levels set"), *ModifierType.ToString()))
-		// {
-		// 	ModifierLevelTags.GetGameplayTagArray(ModifierLevels);
-		// 	ModifierLevels.Insert(FGameplayTag::EmptyTag, 0);  // Level 0
-		// }
-	}
-
-	FMovementModifierData_LocalPredicted<EModifierByte> Data;
+	FMovementModifierData<EModifierByte> Data;
 
 	T GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
-
 	T GetModifierLevel() const { return Data.Modifiers.Num(); }
 
 	void AddModifier(T InLevel)
 	{
-		ensure(this->bHasInitialized);
-		
 		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return; }
 		
 		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
@@ -250,8 +264,6 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted : FMovementModifie
 
 	void RemoveModifier(T InLevel)
 	{
-		ensure(this->bHasInitialized);
-		
 		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return; }
 		
 		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
@@ -263,25 +275,9 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted : FMovementModifie
 
 	void UpdateMovementState(bool bAllowedInCurrentState)
 	{
-		ensure(this->bHasInitialized);
-		
-		const TArray<TEnum>& NewModifiers = bAllowedInCurrentState ? Data.WantsModifiers : TArray<TEnum>();
-		if (NewModifiers != Data.Modifiers)
-		{
-			ChangeModifiers(NewModifiers);
-		}
+		Data.Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TArray<TEnum>();
 	}
 
-	void ChangeModifiers(const TArray<TEnum>& NewModifiers)
-	{
-		if (Data.Modifiers != NewModifiers)
-		{
-			// const uint8 PrevLevel = GetModifierLevel();
-			Data.Modifiers = NewModifiers;
-			// this->OnModifierChanged.ExecuteIfBound(this->ModifierType, GetModifierLevel(), PrevLevel);
-		}
-	}
-	
 	void ServerMove_PerformMovement(T WantsModifiers)
 	{
 		Data.WantsModifiers = FModifierCompression::SetModifiersFromBitmask<TEnum>(WantsModifiers);
@@ -319,11 +315,11 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_LocalPredicted_WithCorrection fin
  * e.g. Snare from a damage event, speed increase after equipping a knife from a server event, etc.
  */
 template <typename T, typename TEnum>
-struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated final : FMovementModifierBase<T, TEnum>
+struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated
 {
-	FMovementModifierBaseData<EModifierByte> Data;
+	FMovementModifierData<EModifierByte> Data;
 
-	uint8 GetWantedModifierLevel() const { return Data.Modifiers.Num(); }
+	uint8 GetWantedModifierLevel() const { return Data.WantsModifiers.Num(); }
 	uint8 GetModifierLevel() const { return Data.Modifiers.Num(); }
 
 	void AddModifier(T InLevel)
@@ -331,9 +327,9 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated final : FMovement
 		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return; }
 		
 		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
-		if (!Data.Modifiers.Contains(Level))
+		if (!Data.WantsModifiers.Contains(Level))
 		{
-			Data.Modifiers.Add(Level);
+			Data.WantsModifiers.Add(Level);
 		}
 	}
 
@@ -342,10 +338,25 @@ struct PREDICTEDMOVEMENT_API FMovementModifier_ServerInitiated final : FMovement
 		if (!FModifierCompression::IsValidBitPosition(InLevel)) { return; }
 		
 		const EModifierByte Level = static_cast<EModifierByte>(1 << InLevel);
-		if (Data.Modifiers.Contains(Level))
+		if (Data.WantsModifiers.Contains(Level))
 		{
-			Data.Modifiers.Remove(Level);
+			Data.WantsModifiers.Remove(Level);
 		}
+	}
+
+	void UpdateMovementState(bool bAllowedInCurrentState)
+	{
+		Data.Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TArray<TEnum>();
+	}
+
+	bool ServerCheckClientError(T Modifiers)
+	{
+		return FModifierCompression::GetBitmaskFromModifiers(this->Data.Modifiers) != Modifiers;
+	}
+
+	void OnClientCorrectionReceived(T Modifiers)
+	{
+		Data.WantsModifiers = FModifierCompression::SetModifiersFromBitmask<TEnum>(Modifiers);
 	}
 };
 

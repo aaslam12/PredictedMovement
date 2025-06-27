@@ -81,7 +81,7 @@ void AModifierCharacter::AddModifier(uint8 InLevel, bool bClientSimulation)
 {
 	if (ModifierMovement)
 	{
-		ModifierMovement->BoostCorrection.AddModifier(InLevel);
+		ModifierMovement->BoostServer.AddModifier(InLevel);
 		// ModifierMovement->AddWantedModifier(InLevel);
 	}
 }
@@ -90,7 +90,7 @@ void AModifierCharacter::RemoveModifier(uint8 InLevel, bool bClientSimulation)
 {
 	if (ModifierMovement)
 	{
-		ModifierMovement->BoostCorrection.RemoveModifier(InLevel);
+		ModifierMovement->BoostServer.RemoveModifier(InLevel);
 		// ModifierMovement->RemoveWantedModifier(InLevel);
 	}
 }

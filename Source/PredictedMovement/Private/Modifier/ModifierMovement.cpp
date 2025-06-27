@@ -17,6 +17,7 @@ void FModifierMoveResponseDataContainer::ServerFillResponseData(const UCharacter
 	const UModifierMovement* MoveComp = Cast<UModifierMovement>(&CharacterMovement);
 	
 	BoostCorrection.ServerFillResponseData(MoveComp->BoostCorrection.Data.Modifiers);  // AUTH
+	BoostServer.ServerFillResponseData(MoveComp->BoostServer.Data.Modifiers);  // AUTH
 	
 	// Modifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->Modifiers);  // AUTH
 }
@@ -33,6 +34,7 @@ bool FModifierMoveResponseDataContainer::Serialize(UCharacterMovementComponent& 
 	if (IsCorrection())
 	{
 		Ar << BoostCorrection.Modifiers;  // AUTH
+		Ar << BoostServer.Modifiers;  // AUTH
 	}
 
 	return !Ar.IsError();
@@ -53,6 +55,7 @@ void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Charac
 	
 	const FSavedMove_Character_Modifier& SavedMove = static_cast<const FSavedMove_Character_Modifier&>(ClientMove);
 	BoostCorrection.ClientFillNetworkMoveData(SavedMove.BoostCorrection.WantsModifiers, SavedMove.BoostCorrection.Modifiers);
+	BoostServer.ClientFillNetworkMoveData(SavedMove.BoostServer.Modifiers);
 	// WantsModifiers = SavedMove.WantsModifiers;
 	// Modifiers = SavedMove.Modifiers;  // AUTH
 }
@@ -70,6 +73,7 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 
 	Ar << BoostCorrection.WantsModifiers;
 	Ar << BoostCorrection.Modifiers;  // AUTH
+	Ar << BoostServer.Modifiers;  // AUTH
 	
 	// Ar << WantsModifiers;
 	// Ar << Modifiers;  // AUTH
@@ -132,13 +136,6 @@ void UModifierMovement::SetUpdatedComponent(USceneComponent* NewUpdatedComponent
 	ModifierCharacterOwner = Cast<AModifierCharacter>(PawnOwner);
 }
 
-void UModifierMovement::BeginPlay()
-{
-	Super::BeginPlay();
-
-	BoostCorrection.Init(FModifierTags::Modifier_Type_Boost);
-}
-
 float UModifierMovement::GetMaxAcceleration() const
 {
 	const float Modified = MaxAccelerationModified * GetBoostLevel();
@@ -172,49 +169,6 @@ bool UModifierMovement::CanBoostInCurrentState() const
 		(IsFalling() || IsMovingOnGround());
 }
 
-TArray<EModifierByte> UModifierMovement::GetBoostModifiersForCurrentState() const
-{
-	if (!UpdatedComponent || UpdatedComponent->IsSimulatingPhysics())
-	{
-		return {};
-	}
-
-	if (!IsFalling() && !IsMovingOnGround())
-	{
-		return {};
-	}
-
-	return BoostCorrection.Data.WantsModifiers;
-}
-
-void UModifierMovement::ChangeModifiers(const TArray<EModifierByte>& NewModifiers, bool bClientSimulation, uint8 PrevSimulatedLevel)
-{
-	if (!HasValidData())
-	{
-		return;
-	}
-
-	// if (!bClientSimulation)
-	// {
-	// 	const TArray<EModifierByte> PrevModifiers = Modifiers;
-	// 	if (PrevModifiers != NewModifiers)
-	// 	{
-	// 		const uint8 PrevLevel = GetModifierLevel();
-	// 		Modifiers = NewModifiers;
-	// 		
-	// 		if (ModifierCharacterOwner->HasAuthority())
-	// 		{
-	// 			ModifierCharacterOwner->SimulatedBoost = GetModifierLevel();
-	// 		}
-	// 		// @TODO ModifierCharacterOwner->OnModifierChanged(ModifierType, ModifierLevel, PrevLevel);
-	// 	}
-	// }
-	// else
-	// {
-	// 	// @TODO ModifierCharacterOwner->OnModifierChanged(ModifierType, ModifierLevel, PrevSimulatedLevel);
-	// }
-}
-
 void UModifierMovement::UpdateModifierMovementState()
 {
 	if (!HasValidData())
@@ -229,6 +183,7 @@ void UModifierMovement::UpdateModifierMovementState()
 
 		const uint8 PrevBoost = GetBoostLevel();
 		BoostCorrection.UpdateMovementState( CanBoostInCurrentState() );
+		BoostServer.UpdateMovementState( CanBoostInCurrentState() );
 		if (GetBoostLevel() != PrevBoost)
 		{
 			// @TODO ModifierCharacterOwner->OnModifierChanged(ModifierType, GetBoostLevel(), PrevBoost);
@@ -299,6 +254,11 @@ bool UModifierMovement::ServerCheckClientError(float ClientTimeStamp, float Delt
 		return true;  // AUTH
 	}
 
+	if (BoostServer.ServerCheckClientError(CurrentMoveData->BoostServer.Modifiers))
+	{
+		return true;  // AUTH
+	}
+
 	return false;
 }
 
@@ -320,6 +280,7 @@ void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_
 	// WantsModifiers = FModifierCompression::SetModifiersFromBitmask<EModifierByte>(MoveResponse.Modifiers);  // AUTH
 
 	BoostCorrection.OnClientCorrectionReceived(MoveResponse.BoostCorrection.Modifiers);
+	BoostServer.OnClientCorrectionReceived(MoveResponse.BoostServer.Modifiers);
 	
 	Super::OnClientCorrectionReceived(ClientData, TimeStamp, NewLocation, NewVelocity, NewBase, NewBaseBoneName,
 		bHasBase, bBaseRelativePosition, ServerMovementMode, ServerGravityDirection);
@@ -348,11 +309,14 @@ void FSavedMove_Character_Modifier::Clear()
 	// Modifiers = 0;  // AUTH
 
 	BoostCorrection.Clear();
+	BoostServer.Clear();
 }
 
 void FSavedMove_Character_Modifier::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel,
 	FNetworkPredictionData_Client_Character& ClientData)
 {
+	// Client ➜ Server (ReplicateMoveToServer)
+	
 	Super::SetMoveFor(C, InDeltaTime, NewAccel, ClientData);
 
 	if (const UModifierMovement* MoveComp = Cast<AModifierCharacter>(C)->GetModifierCharacterMovement())
@@ -390,7 +354,7 @@ bool FSavedMove_Character_Modifier::CanCombineWith(const FSavedMovePtr& NewMove,
 	// 	return false;
 	// }
 
-	if (!BoostCorrection.CanCombineWith(SavedMove->BoostCorrection.Modifiers)) { return false; }
+	if (!BoostCorrection.CanCombineWith(SavedMove->BoostCorrection.WantsModifiers)) { return false; }
 	
 	return FSavedMove_Character::CanCombineWith(NewMove, InCharacter, MaxDelta);
 }
@@ -430,6 +394,7 @@ void FSavedMove_Character_Modifier::PostUpdate(ACharacter* C, EPostUpdateMode Po
 	if (const UModifierMovement* MoveComp = C ? Cast<UModifierMovement>(C->GetCharacterMovement()) : nullptr)
 	{
 		BoostCorrection.PostUpdate(MoveComp->BoostCorrection.Data.Modifiers);  // AUTH
+		BoostServer.PostUpdate(MoveComp->BoostServer.Data.Modifiers);  // AUTH
 		// Modifiers = FModifierCompression::GetBitmaskFromModifiers(MoveComp->Modifiers);  // AUTH
 	}
 
