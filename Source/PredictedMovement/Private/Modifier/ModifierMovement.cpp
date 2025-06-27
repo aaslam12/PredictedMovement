@@ -249,9 +249,9 @@ void UModifierMovement::UpdateModifierMovementState()
 			const FGameplayTag PrevBoostLevel = GetBoostLevel();
 			const uint8 PrevBoostLevelValue = BoostLevel;
 			if (FModifierStatics::ProcessModifiers<TMod_Local, TMod_LocalCorrection, TMod_Server>(
-				BoostLevel, BoostLevelMethod, BoostLevels, UINT8_MAX,
+				BoostLevel, BoostLevelMethod, BoostLevels, bLimitMaxBoosts, MaxBoosts, UINT8_MAX,
 				&BoostLocal, &BoostCorrection, &BoostServer,
-				[this]() { return CanBoostInCurrentState(); }))
+				[this] { return CanBoostInCurrentState(); }))
 			{
 				ModifierCharacterOwner->NotifyModifierChanged(FModifierTags::Modifier_Boost,
 					GetBoostLevel(), PrevBoostLevel, BoostLevel,
@@ -263,9 +263,9 @@ void UModifierMovement::UpdateModifierMovementState()
 			const FGameplayTag PrevSnareLevel = GetSnareLevel();
 			const uint8 PrevSnareLevelValue = SnareLevel;
 			if (FModifierStatics::ProcessModifiers<TMod_Local, TMod_LocalCorrection, TMod_Server>(
-				SnareLevel, SnareLevelMethod, SnareLevels, UINT8_MAX,
+				SnareLevel, SnareLevelMethod, SnareLevels, bLimitMaxSnares, MaxSnares, UINT8_MAX,
 				nullptr, nullptr, &SnareServer,
-				[this]() { return CanSnareInCurrentState(); }))
+				[this] { return CanSnareInCurrentState(); }))
 			{
 				ModifierCharacterOwner->NotifyModifierChanged(FModifierTags::Modifier_Snare,
 					GetSnareLevel(), PrevSnareLevel, SnareLevel,

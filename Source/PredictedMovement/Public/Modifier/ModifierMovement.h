@@ -78,17 +78,35 @@ private:
 public:
 	/**
 	 * Boost increases movement speed and acceleration
-	 * Scaling applied on a per-boost-level basis
+	 * Scaling applied on a per-Boost-level basis
 	 * Every tag defined here must also be defined in the FModifierData Boost property
 	 */
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
 	TMap<FGameplayTag, FMovementModifierParams> Boost;
 
+	/**
+	 * Limits the maximum number of Boost levels that can be applied to the character
+	 * This value is shared between each type of Boost
+	 * It limits both the number being serialized and sent over the network, as well as having gameplay implications
+	 * Priority is granted in order, because modifiers consume the remaining slots, so LocalPredicted -> WithCorrection - ServerInitiated
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(InlineEditConditionToggle))
+	bool bLimitMaxBoosts = true;
+	
+	/**
+	 * Maximum number of Boost levels that can be applied to the character
+	 * This value is shared between each type of Boost
+	 * It limits both the number being serialized and sent over the network, as well as having gameplay implications
+	 * Priority is granted in order, because modifiers consume the remaining slots, so LocalPredicted -> WithCorrection - ServerInitiated
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin=1, UIMin=1, UIMax=32, EditCondition="bLimitMaxBoosts"))
+	int32 MaxBoosts = 8;
+
 	/** Indexed list of Boost levels, used to determine the current Boost level */
 	UPROPERTY()
 	TArray<FGameplayTag> BoostLevels;
 
-	/** The method used to calculate boost levels */
+	/** The method used to calculate Boost levels */
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
 	EModifierLevelMethod BoostLevelMethod;
 	
@@ -99,22 +117,38 @@ public:
 
 public:
 	/**
-	 * Boost increases movement speed and acceleration
-	 * Scaling applied on a per-boost-level basis
-	 * Every tag defined here must also be defined in the FModifierData Boost property
+	 * Snare increases movement speed and acceleration
+	 * Scaling applied on a per-Snare-level basis
+	 * Every tag defined here must also be defined in the FModifierData Snare property
 	 */
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
 	TMap<FGameplayTag, FMovementModifierParams> Snare;
 
-	/** Indexed list of Boost levels, used to determine the current Boost level */
+	/**
+	 * Limits the maximum number of Snare levels that can be applied to the character
+	 * This value is shared between each type of Snare
+	 * It limits both the number being serialized and sent over the network, as well as having gameplay implications
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(InlineEditConditionToggle))
+	bool bLimitMaxSnares = true;
+	
+	/**
+	 * Maximum number of Snare levels that can be applied to the character
+	 * This value is shared between each type of Snare
+	 * It limits both the number being serialized and sent over the network, as well as having gameplay implications
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin=1, UIMin=1, UIMax=32, EditCondition="bLimitMaxSnares"))
+	int32 MaxSnares = 8;
+
+	/** Indexed list of Snare levels, used to determine the current Snare level */
 	UPROPERTY()
 	TArray<FGameplayTag> SnareLevels;
 
-	/** The method used to calculate boost levels */
+	/** The method used to calculate Snare levels */
 	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
 	EModifierLevelMethod SnareLevelMethod;
 	
-	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
+	/** Local Predicted Snare based on Player Input, that can be corrected by the server when a mismatch occurs */
 	TMod_Server SnareServer;
 
 public:

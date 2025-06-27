@@ -237,10 +237,22 @@ struct PREDICTEDMOVEMENT_API FMovementModifier
 			return ModifierLevel == Level;
 		}).Num();
 	}
-	
-	bool UpdateMovementState(bool bAllowedInCurrentState)
+
+	static void LimitNumModifiers(TModifierStack& Modifiers, int32& RemainingModifiers);
+
+	bool UpdateMovementState(bool bAllowedInCurrentState, bool bClampMax, int32& Remaining)
 	{
+		// Clamp the number of modifiers to the maximum allowed -- this removes old modifiers first
+		// Note: There may be potential for de-sync if client removes server modifiers out of order (cross that bridge when we get there)
+		if (bAllowedInCurrentState && bClampMax)
+		{
+			LimitNumModifiers(Data.WantsModifiers, Remaining);
+		}
+
+		// Only update the modifiers if the current state allows it
 		const TModifierStack Modifiers = bAllowedInCurrentState ? Data.WantsModifiers : TModifierStack();
+
+		// If the modifiers have changed, update the data
 		if (Data.Modifiers != Modifiers)
 		{
 			Data.Modifiers = Modifiers;
@@ -309,6 +321,8 @@ struct PREDICTEDMOVEMENT_API FModifierStatics
 	TModSize& CurrentLevel,
 	EModifierLevelMethod Method,
 	const TArray<FGameplayTag>& LevelTags,
+	bool bLimitMaxModifiers,
+	int32 MaxModifiers,
 	TModSize InvalidLevel,
 	TLocalPredicted* Local,
 	TCorrection* Correction,
@@ -318,10 +332,12 @@ struct PREDICTEDMOVEMENT_API FModifierStatics
 		const TModSize PrevLevel = CurrentLevel;
 		bool bStateChanged = false;
 
+		int32 Remaining = MaxModifiers;
+
 		// Update state
-		bStateChanged |= Local ? Local->UpdateMovementState(CanActivateCallback()) : false;
-		bStateChanged |= Correction ? Correction->UpdateMovementState(CanActivateCallback()) : false;
-		bStateChanged |= Server ? Server->UpdateMovementState(CanActivateCallback()) : false;
+		bStateChanged |= Local ? Local->UpdateMovementState(CanActivateCallback(), bLimitMaxModifiers, Remaining) : false;
+		bStateChanged |= Correction ? Correction->UpdateMovementState(CanActivateCallback(), bLimitMaxModifiers, Remaining) : false;
+		bStateChanged |= Server ? Server->UpdateMovementState(CanActivateCallback(), bLimitMaxModifiers, Remaining) : false;
 
 		if (bStateChanged)
 		{

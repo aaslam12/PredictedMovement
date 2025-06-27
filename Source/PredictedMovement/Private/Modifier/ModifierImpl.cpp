@@ -24,6 +24,27 @@ bool FModifierMoveData_ServerInitiated::Serialize(FArchive& Ar, const FString& E
 	return FModifierStatics::NetSerialize(Modifiers, Ar, ErrorName, MaxSerializedModifiers);
 }
 
+void FMovementModifier::LimitNumModifiers(TModifierStack& Modifiers, int32& RemainingModifiers)
+{
+	if (Modifiers.Num() > RemainingModifiers)
+	{
+		// Limit the number of modifiers to the maximum allowed
+		if (RemainingModifiers <= 0)
+		{
+			// If MaxModifiers is 0 or less, we can't have any modifiers
+			Modifiers.Reset();
+		}
+		else
+		{
+			// Remove the oldest entries (from the start)
+			const int32 NumToRemove = Modifiers.Num() - RemainingModifiers;
+			Modifiers.RemoveAt(0, NumToRemove, EAllowShrinking::No);
+		}
+	}
+
+	RemainingModifiers = FMath::Max(RemainingModifiers - Modifiers.Num(), 0);
+}
+
 bool FModifierStatics::NetSerialize(TModifierStack& Modifiers, FArchive& Ar, const FString& ErrorName, uint8 MaxSerializedModifiers)
 {
 	// Don't serialize modifier stack if the max is 0
