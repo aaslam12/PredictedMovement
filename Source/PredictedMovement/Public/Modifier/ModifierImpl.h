@@ -221,6 +221,22 @@ struct PREDICTEDMOVEMENT_API FMovementModifier
 		}
 		return false;
 	}
+
+	TModSize GetNumWantedModifiersByLevel(TModSize Level) const
+	{
+		return Data.WantsModifiers.FilterByPredicate([Level](uint8 ModifierLevel)
+		{
+			return ModifierLevel == Level;
+		}).Num();
+	}
+
+	TModSize GetNumModifiersByLevel(TModSize Level) const
+	{
+		return Data.Modifiers.FilterByPredicate([Level](uint8 ModifierLevel)
+		{
+			return ModifierLevel == Level;
+		}).Num();
+	}
 	
 	bool UpdateMovementState(bool bAllowedInCurrentState)
 	{
