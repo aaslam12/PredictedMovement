@@ -6,6 +6,10 @@
 #include "Modifier/ModifierCharacter.h"
 #include "Modifier/ModifierTags.h"
 
+#if WITH_EDITOR
+#include "Misc/DataValidation.h"
+#endif
+
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModifierMovement)
 
 void FModifierMoveResponseDataContainer::ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement,
@@ -114,9 +118,13 @@ UModifierMovement::UModifierMovement(const FObjectInitializer& ObjectInitializer
 {
 	SetNetworkMoveDataContainer(ModifierMoveDataContainer);
 	SetMoveResponseDataContainer(ModifierMoveResponseDataContainer);
-	
+
+	// @TODO nuke
 	MaxAccelerationModified = 250.f;
 	MaxWalkSpeedModified = 250.f;
+
+	// Init Boost Levels
+	Boost.Add(FModifierTags::Modifier_Boost, { 1.50f });  // 1.5x Speed Boost
 }
 
 bool UModifierMovement::HasValidData() const
@@ -138,30 +146,67 @@ void UModifierMovement::SetUpdatedComponent(USceneComponent* NewUpdatedComponent
 	ModifierCharacterOwner = Cast<AModifierCharacter>(PawnOwner);
 }
 
+#if WITH_EDITOR
+EDataValidationResult UModifierMovement::IsDataValid(class FDataValidationContext& Context) const
+{
+	const int32 MaxBoostLevels = FMath::Min3(BoostLocal.BitSize, BoostCorrection.BitSize, BoostServer.BitSize);
+	if (Boost.Num() > MaxBoostLevels)
+	{
+		Context.AddError(FText::Format(
+			NSLOCTEXT("ModifierMovement", "BoostLevelsTooMany", "ModifierMovement {0} has {1} Boost Levels. Max is {2}."),
+			FText::FromString(GetName()), Boost.Num(), MaxBoostLevels));
+		return EDataValidationResult::Invalid;
+	}
+	return Super::IsDataValid(Context);
+}
+#endif
+
 float UModifierMovement::GetMaxAcceleration() const
 {
-	const float Modified = MaxAccelerationModified * GetBoostLevel();
-	return Super::GetMaxAcceleration() + Modified;
+	return Super::GetMaxAcceleration() * GetBoostAccelScalar();
 }
 
 float UModifierMovement::GetMaxSpeed() const
 {
-	const float Modified = MaxWalkSpeedModified * GetBoostLevel();
-	return Super::GetMaxSpeed() + Modified;
+	return Super::GetMaxSpeed() * GetBoostSpeedScalar();
 }
 
 float UModifierMovement::GetMaxBrakingDeceleration() const
 {
-	return Super::GetMaxBrakingDeceleration();
+	return Super::GetMaxBrakingDeceleration() * GetBoostBrakingScalar();
+}
+
+float UModifierMovement::GetGroundFriction(float DefaultGroundFriction) const
+{
+	return GroundFriction * GetBoostGroundFrictionScalar();
+}
+
+float UModifierMovement::GetBrakingFriction() const
+{
+	return BrakingFriction * GetBoostBrakingFrictionScalar();
+}
+
+float UModifierMovement::GetRootMotionTranslationScalar() const
+{
+	return BoostAffectsRootMotion() ? GetBoostSpeedScalar() : 1.f;
 }
 
 void UModifierMovement::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)
 {
+	if (IsMovingOnGround())
+	{
+		Friction = GetGroundFriction(Friction);
+	}
+	
 	Super::CalcVelocity(DeltaTime, Friction, bFluid, BrakingDeceleration);
 }
 
 void UModifierMovement::ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration)
 {
+	if (IsMovingOnGround())
+	{
+		Friction = bUseSeparateBrakingFriction ? GetBrakingFriction() : GetGroundFriction(Friction);
+	}
 	Super::ApplyVelocityBraking(DeltaTime, Friction, BrakingDeceleration);
 }
 
@@ -178,25 +223,33 @@ void UModifierMovement::UpdateModifierMovementState()
 		return;
 	}
 
+	// Initialize BoostLevels if empty
+	if (BoostLevels.Num() == 0 && Boost.Num() > 0)
+	{
+		for (const auto& Item : Boost) { BoostLevels.Add(Item.Key); }
+	}
+
 	// Proxies get replicated Modifier state.
 	if (CharacterOwner->GetLocalRole() != ROLE_SimulatedProxy)
 	{
 		// Check for a change in Modifier state. Players toggle Modifier by changing WantsModifierLevel.
 
-		const uint8 PrevBoost = GetBoostLevel();
-		BoostLocal.UpdateMovementState(			CanBoostInCurrentState() );
-		BoostCorrection.UpdateMovementState(	CanBoostInCurrentState() );
-		BoostServer.UpdateMovementState(		CanBoostInCurrentState() );
-		if (GetBoostLevel() != PrevBoost)
-		{
-			// @TODO ModifierCharacterOwner->OnModifierChanged(ModifierType, GetBoostLevel(), PrevBoost);
+		{	// Boost
+			const FGameplayTag PrevBoostLevel = GetBoostLevel();
+			const uint8 PrevLevel = BoostLevel;
+			if (FModifierStatics::ProcessModifiers<uint8, EModifierByte>(
+				BoostLevel,
+				BoostLevelMethod,
+				BoostLevels,
+				&BoostLocal,
+				&BoostCorrection,
+				&BoostServer,
+				[this]() { return CanBoostInCurrentState(); }))
+			{
+				ModifierCharacterOwner->OnModifierChanged(FModifierTags::Modifier_Boost, GetBoostLevel(),
+					PrevBoostLevel, BoostLevel, PrevLevel);
+			}
 		}
-		
-		// const TArray<EModifierByte>& NewModifiers = GetBoostModifiersForCurrentState();
-		// if (NewModifiers != Modifiers)
-		// {
-		// 	ChangeModifiers(NewModifiers);
-		// }
 	}
 }
 
@@ -305,6 +358,64 @@ bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 	BoostCorrection.Data.WantsModifiers = RealBoostCorrection;
 
 	return bResult;
+}
+
+void UModifierMovement::TickCharacterPose(float DeltaTime)
+{
+	/*
+	 * ACharacter::GetAnimRootMotionTranslationScale() is non-virtual, so we have to duplicate the entire function.
+	 * All we do here is scale CharacterOwner->GetAnimRootMotionTranslationScale() by GetRootMotionTranslationScalar()
+	 * 
+	 * This allows our snares to affect root motion.
+	 */
+	
+	if (DeltaTime < MIN_TICK_TIME)
+	{
+		return;
+	}
+
+	check(CharacterOwner && CharacterOwner->GetMesh());
+	USkeletalMeshComponent* CharacterMesh = CharacterOwner->GetMesh();
+
+	// bAutonomousTickPose is set, we control TickPose from the Character's Movement and Networking updates, and bypass the Component's update.
+	// (Or Simulating Root Motion for remote clients)
+	CharacterMesh->bIsAutonomousTickPose = true;
+
+	if (CharacterMesh->ShouldTickPose())
+	{
+		// Keep track of if we're playing root motion, just in case the root motion montage ends this frame.
+		const bool bWasPlayingRootMotion = CharacterOwner->IsPlayingRootMotion();
+
+		CharacterMesh->TickPose(DeltaTime, true);
+
+		// Grab root motion now that we have ticked the pose
+		if (CharacterOwner->IsPlayingRootMotion() || bWasPlayingRootMotion)
+		{
+			FRootMotionMovementParams RootMotion = CharacterMesh->ConsumeRootMotion();
+			if (RootMotion.bHasRootMotion)
+			{
+				RootMotion.ScaleRootMotionTranslation(CharacterOwner->GetAnimRootMotionTranslationScale() * GetRootMotionTranslationScalar());
+				RootMotionParams.Accumulate(RootMotion);
+			}
+
+#if !(UE_BUILD_SHIPPING)
+			// Debugging
+			{
+				const FAnimMontageInstance* RootMotionMontageInstance = CharacterOwner->GetRootMotionAnimMontageInstance();
+				UE_LOG(LogRootMotion, Log, TEXT("UCharacterMovementComponent::TickCharacterPose Role: %s, RootMotionMontage: %s, MontagePos: %f, DeltaTime: %f, ExtractedRootMotion: %s, AccumulatedRootMotion: %s")
+					, *UEnum::GetValueAsString(TEXT("Engine.ENetRole"), CharacterOwner->GetLocalRole())
+					, *GetNameSafe(RootMotionMontageInstance ? RootMotionMontageInstance->Montage : NULL)
+					, RootMotionMontageInstance ? RootMotionMontageInstance->GetPosition() : -1.f
+					, DeltaTime
+					, *RootMotion.GetRootMotionTransform().GetTranslation().ToCompactString()
+					, *RootMotionParams.GetRootMotionTransform().GetTranslation().ToCompactString()
+					);
+			}
+#endif // !(UE_BUILD_SHIPPING)
+		}
+	}
+
+	CharacterMesh->bIsAutonomousTickPose = false;
 }
 
 void FSavedMove_Character_Modifier::Clear()

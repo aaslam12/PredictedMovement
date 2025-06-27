@@ -3,7 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "ModifierImpl.h"
+#include "ModifierTypes.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Modifier/ModifierCompression.h"
 #include "System/PredictedMovementVersioning.h"
@@ -76,14 +78,30 @@ private:
 
 public:
 	/** Max Acceleration (rate of change of velocity) */
-	UPROPERTY(Category="Character Movement (General Settings)", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0"))
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0"))
 	float MaxAccelerationModified;
 	
 	/** The maximum ground speed when Modified. */
-	UPROPERTY(Category="Character Movement: Walking", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0", ForceUnits="cm/s"))
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite, meta=(ClampMin="0", UIMin="0", ForceUnits="cm/s"))
 	float MaxWalkSpeedModified;
 
 public:
+	/**
+	 * Boost increases movement speed and acceleration
+	 * Scaling applied on a per-boost-level basis
+	 * Every tag defined here must also be defined in the FModifierData Boost property
+	 */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
+	TMap<FGameplayTag, FMovementModifierParams> Boost;
+
+	/** Indexed list of Boost levels, used to determine the current Boost level */
+	UPROPERTY()
+	TArray<FGameplayTag> BoostLevels;
+
+	/** The method used to calculate boost levels */
+	UPROPERTY(Category="Character Movement: Modifiers", EditAnywhere, BlueprintReadWrite)
+	EModifierLevelMethod BoostLevelMethod;
+	
 	/** Local Predicted Boost based on Player Input, that can be corrected by the server when a mismatch occurs */
 	FMovementModifier_LocalPredicted<uint8, EModifierByte> BoostLocal;
 	FMovementModifier_LocalPredicted_WithCorrection<uint8, EModifierByte> BoostCorrection;
@@ -96,10 +114,17 @@ public:
 	virtual void PostLoad() override;
 	virtual void SetUpdatedComponent(USceneComponent* NewUpdatedComponent) override;
 
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
+	
 public:
 	virtual float GetMaxAcceleration() const override;
 	virtual float GetMaxSpeed() const override;
 	virtual float GetMaxBrakingDeceleration() const override;
+	virtual float GetGroundFriction(float DefaultGroundFriction) const;
+	virtual float GetBrakingFriction() const;
+	virtual float GetRootMotionTranslationScalar() const;
 	
 	virtual void CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration) override;
 	virtual void ApplyVelocityBraking(float DeltaTime, float Friction, float BrakingDeceleration) override;
@@ -107,8 +132,18 @@ public:
 public:
 	/* BOOST Implementation */
 
-	virtual uint8 GetBoostLevel() const { return BoostLocal.GetModifierLevel() + BoostCorrection.GetModifierLevel() + BoostServer.GetModifierLevel(); }
+	uint8 BoostLevel = 0;
+	const FMovementModifierParams* GetBoostParams() const { return Boost.Find(GetBoostLevel()); }
+	FGameplayTag GetBoostLevel() const { return BoostLevels.IsValidIndex(BoostLevel) ? BoostLevels[BoostLevel] : FGameplayTag::EmptyTag; }
+	uint8 GetBoostLevelIndex(const FGameplayTag& Level) const { return BoostLevels.IndexOfByKey(Level) > INDEX_NONE ? BoostLevels.IndexOfByKey(Level) : UINT8_MAX; }
 	virtual bool CanBoostInCurrentState() const;
+
+	float GetBoostSpeedScalar() const { return GetBoostParams() ? GetBoostParams()->MaxWalkSpeed : 1.f; }
+	float GetBoostAccelScalar() const { return GetBoostParams() ? GetBoostParams()->MaxAcceleration : 1.f; }
+	float GetBoostBrakingScalar() const { return GetBoostParams() ? GetBoostParams()->BrakingDeceleration : 1.f; }
+	float GetBoostGroundFrictionScalar() const { return GetBoostParams() ? GetBoostParams()->GroundFriction : 1.f; }
+	float GetBoostBrakingFrictionScalar() const { return GetBoostParams() ? GetBoostParams()->BrakingFriction : 1.f; }
+	bool BoostAffectsRootMotion() const { return GetBoostParams() ? GetBoostParams()->bAffectsRootMotion : false; }
 	
 	/* ~BOOST Implementation */
 	
@@ -137,6 +172,9 @@ public:
 protected:
 	virtual bool ClientUpdatePositionAfterServerUpdate() override;
 
+protected:
+	virtual void TickCharacterPose(float DeltaTime) override;  // ACharacter::GetAnimRootMotionTranslationScale() is non-virtual so we have to duplicate this entire function
+	
 private:
 	FModifierNetworkMoveDataContainer ModifierMoveDataContainer;
 	FModifierMoveResponseDataContainer ModifierMoveResponseDataContainer;

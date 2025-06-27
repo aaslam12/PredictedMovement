@@ -202,42 +202,4 @@ public:
 		}
 		return Result;
 	}
-	
-	// template <typename T>
-	// static TArray<T> SetModifiersFromBitmask(T ModifierFlags)
-	// {
-	// 	static_assert(std::is_unsigned_v<T>, "SetModifierFromBitmask only supports unsigned integer types.");
-	// 	static_assert(sizeof(T) <= sizeof(uint64), "SetModifierFromBitmask supports up to uint64.");
-	//
-	// 	TArray<T> Result;
-	//
-	// 	const uint64 MaxBits = sizeof(T) * 8;
-	//
-	// 	for (uint64 BitIndex = 0; BitIndex < MaxBits; ++BitIndex)
-	// 	{
-	// 		T Flag = static_cast<T>(1ULL << BitIndex);
-	// 		if ((ModifierFlags & Flag) != 0)
-	// 		{
-	// 			Result.Add(Flag);
-	// 		}
-	// 	}
-	//
-	// 	return Result;
-	// }
-	//
-	// template <typename T>
-	// static T GetBitmaskFromModifiers(const TArray<T>& Modifiers)
-	// {
-	// 	static_assert(std::is_unsigned_v<T>, "GetBitmaskFromModifiers only supports unsigned integer types.");
-	// 	static_assert(sizeof(T) <= sizeof(uint64), "GetBitmaskFromModifiers supports up to uint64.");
-	//
-	// 	T Bitmask = 0;
-	//
-	// 	for (const T Modifier : Modifiers)
-	// 	{
-	// 		Bitmask |= Modifier;
-	// 	}
-	//
-	// 	return Bitmask;
-	// }
 };

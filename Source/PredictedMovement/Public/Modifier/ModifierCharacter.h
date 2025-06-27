@@ -24,24 +24,23 @@ protected:
 	FORCEINLINE UModifierMovement* GetModifierCharacterMovement() const { return ModifierMovement; }
 
 public:
-	virtual void OnModifierChanged(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
-	virtual void OnModifierAdded(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
-	virtual void OnModifierRemoved(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+	virtual void OnModifierChanged(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
+		const FGameplayTag& PrevModifierLevel, uint8 ModifierLevelValue, uint8 PrevModifierLevelValue);
+	
+	virtual void OnModifierAdded(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
+		const FGameplayTag& PrevModifierLevel, uint8 ModifierLevelValue, uint8 PrevModifierLevelValue);
+	
+	virtual void OnModifierRemoved(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel,
+		const FGameplayTag& PrevModifierLevel, uint8 ModifierLevelValue, uint8 PrevModifierLevelValue);
 
 	UFUNCTION(BlueprintImplementableEvent, Category=Character, meta=(DisplayName="On Modifier Added"))
-	void K2_OnModifierAdded(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+	void K2_OnModifierAdded(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel, const FGameplayTag& PrevModifierLevel);
 
 	UFUNCTION(BlueprintImplementableEvent, Category=Character, meta=(DisplayName="On Modifier Changed"))
-	void K2_OnModifierChanged(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
+	void K2_OnModifierChanged(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel, const FGameplayTag& PrevModifierLevel);
 
 	UFUNCTION(BlueprintImplementableEvent, Category=Character, meta=(DisplayName="On Modifier Removed"))
-	void K2_OnModifierRemoved(const FGameplayTag& ModifierType, uint8 ModifierLevel, uint8 PrevModifierLevel);
-
-	
-public:
-	/** Set by character movement to specify that this Character is currently Modified. */
-	UPROPERTY(BlueprintReadOnly, ReplicatedUsing=OnRep_SimulatedBoost, Category=Character)
-	uint8 SimulatedBoost = 0;
+	void K2_OnModifierRemoved(const FGameplayTag& ModifierType, const FGameplayTag& ModifierLevel, const FGameplayTag& PrevModifierLevel);
 
 public:
 	AModifierCharacter(const FObjectInitializer& FObjectInitializer);
@@ -49,6 +48,10 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 public:
+	/** Set by character movement to specify that this Character is currently Modified. */
+	UPROPERTY(ReplicatedUsing=OnRep_SimulatedBoost)
+	uint8 SimulatedBoost = 0;
+
 	/** Handle Crouching replicated from server */
 	UFUNCTION()
 	virtual void OnRep_SimulatedBoost(uint8 PrevLevel);
@@ -60,7 +63,7 @@ public:
 	 * @see CharacterMovement->WantsToModifier
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation", GameplayTagFilter="Modifier.Boost"))
-	virtual bool Boost(uint8 Level, EModifierNetType NetType, bool bClientSimulation = false);
+	virtual bool Boost(FGameplayTag Level, EModifierNetType NetType, bool bClientSimulation = false);
 
 	/**
 	 * Request the character to stop Modified. The request is processed on the next update of the CharacterMovementComponent.
@@ -69,5 +72,5 @@ public:
 	 * @see CharacterMovement->WantsToModifier
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(HidePin="bClientSimulation", GameplayTagFilter="Modifier.Boost"))
-	virtual bool UnBoost(uint8 Level, EModifierNetType NetType, bool bClientSimulation = false);
+	virtual bool UnBoost(FGameplayTag Level, EModifierNetType NetType, bool bClientSimulation = false);
 };
