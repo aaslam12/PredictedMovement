@@ -141,7 +141,6 @@ public:
 	/**
 	 * Request the character to start SlowFall. The request is processed on the next update of the CharacterMovementComponent.
 	 * @param Level The level of the SlowFall to remove.
-	 * @param NetType How the SlowFall is applied, either locally predicted, with correction, or server initiated.
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.SlowFall"))
 	virtual bool SlowFall(FGameplayTag Level);
@@ -149,7 +148,6 @@ public:
 	/**
 	 * Request the character to stop SlowFall. The request is processed on the next update of the CharacterMovementComponent.
 	 * @param Level The level of the SlowFall to remove.
-	 * @param NetType How the SlowFall is applied, either locally predicted, with correction, or server initiated.
 	 * @param bRemoveAll If true, removes all SlowFalls of the specified level, otherwise only removes the first one found.
 	 */
 	UFUNCTION(BlueprintCallable, Category=Character, meta=(GameplayTagFilter="Modifier.SlowFall"))
