@@ -335,8 +335,6 @@ protected:
 	/* ~Client Auth Implementation */
 	
 public:
-	// @TODO confirm accessors
-	
 	virtual void ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData) override;
 
 protected:
