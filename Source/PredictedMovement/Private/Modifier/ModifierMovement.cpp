@@ -5,6 +5,7 @@
 
 #include "Modifier/ModifierCharacter.h"
 #include "Modifier/ModifierTags.h"
+#include "Components/SkeletalMeshComponent.h"
 
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"

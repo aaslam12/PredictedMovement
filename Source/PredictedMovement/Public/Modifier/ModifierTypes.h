@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Curves/CurveFloat.h"
 #include "ModifierTypes.generated.h"
 
 
