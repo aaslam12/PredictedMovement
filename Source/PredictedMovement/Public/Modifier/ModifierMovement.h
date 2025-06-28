@@ -338,7 +338,8 @@ public:
 	// @TODO confirm accessors
 	
 	virtual void ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData) override;
-	
+
+protected:
 	virtual bool ServerCheckClientError(float ClientTimeStamp, float DeltaTime, const FVector& Accel,
 		const FVector& ClientWorldLocation, const FVector& RelativeClientLocation,
 		UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName, uint8 ClientMovementMode) override;
@@ -347,10 +348,12 @@ public:
 		const FVector& RelativeClientLocation, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName,
 		uint8 ClientMovementMode) override;
 
+public:
 	virtual void ClientAdjustPosition_Implementation(float TimeStamp, FVector NewLoc, FVector NewVel,
 		UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase, bool bBaseRelativePosition,
 		uint8 ServerMovementMode, TOptional<FRotator> OptionalRotation = TOptional<FRotator>()) override;
-	
+
+protected:
 	virtual void OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData, float TimeStamp,
 		FVector NewLocation, FVector NewVelocity, UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase,
 		bool bBaseRelativePosition, uint8 ServerMovementMode
@@ -360,7 +363,6 @@ public:
 	) override;
 #endif
 
-protected:
 	virtual bool ClientUpdatePositionAfterServerUpdate() override;
 
 protected:
