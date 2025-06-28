@@ -604,7 +604,7 @@ void UModifierMovement::ClientAdjustPosition_Implementation(float TimeStamp, FVe
 		bBaseRelativePosition, ServerMovementMode,OptionalRotation);
 
 	const FModifierMoveResponseDataContainer& MoveResponse = static_cast<const FModifierMoveResponseDataContainer&>(GetMoveResponseDataContainer());
-	ClientAuthAlpha = MoveResponse.ClientAuthAlpha;
+	ClientAuthAlpha = MoveResponse.bHasClientAuthAlpha ? MoveResponse.ClientAuthAlpha : 0.f;
 
 	// Preserve client location relative to the partial client authority we have
 	const FVector AuthLocation = FMath::Lerp<FVector>(UpdatedComponent->GetComponentLocation(), ClientLoc, ClientAuthAlpha);
@@ -639,8 +639,6 @@ bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 {
 	const TModifierStack RealBoostLocal = BoostLocal.Data.WantsModifiers;
 	const TModifierStack RealBoostCorrection = BoostCorrection.Data.WantsModifiers;
-	const TModifierStack RealBoostServer = BoostServer.Data.WantsModifiers;
-	const TModifierStack RealSnareServer = SnareServer.Data.WantsModifiers;
 	const TModifierStack RealSlowFallLocal = SlowFallLocal.Data.WantsModifiers;
 
 	const FVector ClientLoc = UpdatedComponent->GetComponentLocation();
@@ -649,8 +647,6 @@ bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 	
 	BoostLocal.Data.WantsModifiers = RealBoostLocal;
 	BoostCorrection.Data.WantsModifiers = RealBoostCorrection;
-	BoostServer.Data.WantsModifiers = RealBoostServer;
-	SnareServer.Data.WantsModifiers = RealSnareServer;
 	SlowFallLocal.Data.WantsModifiers = RealSlowFallLocal;
 
 	// Preserve client location relative to the partial client authority we have
