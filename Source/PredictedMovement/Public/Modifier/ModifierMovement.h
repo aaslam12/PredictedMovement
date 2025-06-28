@@ -20,9 +20,20 @@ struct PREDICTEDMOVEMENT_API FModifierMoveResponseDataContainer : FCharacterMove
 {  // Server ➜ Client
 	using Super = FCharacterMoveResponseDataContainer;
 
+	/*
+	 * Used by the server to send Modifier data to the client
+	 * LocalPredicted modifiers are not sent, as the server does not correct input states
+	 */
+	
 	FModifierMoveResponse BoostCorrection;
 	FModifierMoveResponse BoostServer;
 	FModifierMoveResponse SnareServer;
+
+	/** Tell the client how much location authority they have */
+	float ClientAuthAlpha = 0.f;
+
+	/** No need to send the float if the client has no authority */
+	bool bHasClientAuthAlpha;
 
 	virtual void ServerFillResponseData(const UCharacterMovementComponent& CharacterMovement, const FClientAdjustment& PendingAdjustment) override;
 	virtual bool Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar, UPackageMap* PackageMap) override;
@@ -36,6 +47,12 @@ public:
 	FModifierNetworkMoveData()
 	{}
 
+	/*
+	 * Used by the client to send Modifier data to the server
+	 * If local predicted, this data is based on player input, and the server will apply it
+	 * Otherwise, the server will compare the client and server data to know when to send a correction
+	 */
+	
 	FModifierMoveData_LocalPredicted BoostLocal;
 	FModifierMoveData_WithCorrection BoostCorrection;
 	FModifierMoveData_ServerInitiated BoostServer;
@@ -200,6 +217,9 @@ public:
 	FClientAuthStack ClientAuthStack;
 
 	UPROPERTY()
+	float ClientAuthAlpha = 0.f;
+
+	UPROPERTY()
 	uint64 ClientAuthIdCounter = 0;
 	
 public:
@@ -286,8 +306,8 @@ public:
 	
 public:
 	/* Client Auth Implementation */
-	
-	virtual FClientAuthData* GetClientAuthData();
+
+	virtual FClientAuthData* ProcessClientAuthData();
 	FClientAuthParams* GetClientAuthParamsForSource(const FGameplayTag& Source) { return ClientAuthParams.Find(Source); }
 	virtual FClientAuthParams GetClientAuthParams(const FClientAuthData* ClientAuthData);
 
@@ -310,11 +330,13 @@ public:
 	virtual void GrantClientAuthority(FGameplayTag ClientAuthSource, float OverrideDuration = -1.f);
 
 protected:
-	virtual bool ServerShouldGrantClientPositionAuthority(FVector& ClientLoc);
+	virtual bool ServerShouldGrantClientPositionAuthority(FVector& ClientLoc, FClientAuthData*& AuthData);
 	
 	/* ~Client Auth Implementation */
 	
 public:
+	// @TODO confirm accessors
+	
 	virtual void ServerMove_PerformMovement(const FCharacterNetworkMoveData& MoveData) override;
 	
 	virtual bool ServerCheckClientError(float ClientTimeStamp, float DeltaTime, const FVector& Accel,
@@ -325,6 +347,10 @@ public:
 		const FVector& RelativeClientLocation, UPrimitiveComponent* ClientMovementBase, FName ClientBaseBoneName,
 		uint8 ClientMovementMode) override;
 
+	virtual void ClientAdjustPosition_Implementation(float TimeStamp, FVector NewLoc, FVector NewVel,
+		UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase, bool bBaseRelativePosition,
+		uint8 ServerMovementMode, TOptional<FRotator> OptionalRotation = TOptional<FRotator>()) override;
+	
 	virtual void OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData, float TimeStamp,
 		FVector NewLocation, FVector NewVelocity, UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase,
 		bool bBaseRelativePosition, uint8 ServerMovementMode

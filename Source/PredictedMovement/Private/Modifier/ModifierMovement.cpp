@@ -12,6 +12,8 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModifierMovement)
 
+DEFINE_LOG_CATEGORY_STATIC(LogModifierMovement, Log, All);
+
 namespace ModifierMovementCVars
 {
 #if !UE_BUILD_SHIPPING
@@ -48,11 +50,20 @@ void FModifierMoveResponseDataContainer::ServerFillResponseData(const UCharacter
 	Super::ServerFillResponseData(CharacterMovement, PendingAdjustment);
 
 	// Server ➜ Client
-	const UModifierMovement* MoveComp = Cast<UModifierMovement>(&CharacterMovement);
+
+	// Server >> APlayerController::SendClientAdjustment() ➜ SendClientAdjustment ➜ ServerSendMoveResponse ➜
+	// ServerFillResponseData ➜ MoveResponsePacked_ServerSend >> Client 
 	
+	const UModifierMovement* MoveComp = Cast<UModifierMovement>(&CharacterMovement);
+
+	// Fill the response data with the current modifier state
 	BoostCorrection.ServerFillResponseData(MoveComp->BoostCorrection.Data.Modifiers);
 	BoostServer.ServerFillResponseData(MoveComp->BoostServer.Data.Modifiers);
 	SnareServer.ServerFillResponseData(MoveComp->SnareServer.Data.Modifiers);
+
+	// Fill ClientAuthAlpha
+	ClientAuthAlpha = MoveComp->ClientAuthAlpha;
+	bHasClientAuthAlpha = ClientAuthAlpha > 0.f;
 }
 
 bool FModifierMoveResponseDataContainer::Serialize(UCharacterMovementComponent& CharacterMovement, FArchive& Ar,
@@ -66,9 +77,21 @@ bool FModifierMoveResponseDataContainer::Serialize(UCharacterMovementComponent& 
 	// Server ➜ Client
 	if (IsCorrection())
 	{
+		// Serialize Modifiers
 		Ar << BoostCorrection.Modifiers;
 		Ar << BoostServer.Modifiers;
 		Ar << SnareServer.Modifiers;
+
+		// Serialize ClientAuthAlpha
+		Ar.SerializeBits(&bHasClientAuthAlpha, 1);
+		if (bHasClientAuthAlpha)
+		{
+			Ar << ClientAuthAlpha;
+		}
+		else if (!Ar.IsSaving())
+		{
+			ClientAuthAlpha = 0.f;
+		}
 	}
 
 	return !Ar.IsError();
@@ -83,17 +106,17 @@ void FModifierNetworkMoveData::ClientFillNetworkMoveData(const FSavedMove_Charac
 
 	// Client ➜ Server
 	
-	// CallServerMovePacked ➜ ClientFillNetworkMoveData ➜ ServerMovePacked_ClientSend >> Server
+	// Client >> CallServerMovePacked ➜ ClientFillNetworkMoveData ➜ ServerMovePacked_ClientSend >> Server
 	// >> ServerMovePacked_ServerReceive ➜ ServerMove_HandleMoveData ➜ ServerMove_PerformMovement
 	// ➜ MoveAutonomous (UpdateFromCompressedFlags)
 	
 	const FSavedMove_Character_Modifier& SavedMove = static_cast<const FSavedMove_Character_Modifier&>(ClientMove);
+
+	// Fill the Modifier data from the saved move
 	BoostLocal.ClientFillNetworkMoveData(SavedMove.BoostLocal.WantsModifiers);
 	BoostCorrection.ClientFillNetworkMoveData(SavedMove.BoostCorrection.WantsModifiers, SavedMove.BoostCorrection.Modifiers);
 	BoostServer.ClientFillNetworkMoveData(SavedMove.BoostServer.Modifiers);
-	
 	SnareServer.ClientFillNetworkMoveData(SavedMove.SnareServer.Modifiers);
-
 	SlowFallLocal.ClientFillNetworkMoveData(SavedMove.SlowFallLocal.WantsModifiers);
 }
 
@@ -102,12 +125,11 @@ bool FModifierNetworkMoveData::Serialize(UCharacterMovementComponent& CharacterM
 {  // Client ➜ Server
 	Super::Serialize(CharacterMovement, Ar, PackageMap, MoveType);
 
+	// Serialize Modifier data
 	BoostLocal.Serialize(Ar, TEXT("BoostLocal"));
 	BoostCorrection.Serialize(Ar, TEXT("BoostCorrection"));
 	BoostServer.Serialize(Ar, TEXT("BoostServer"));
-
 	SnareServer.Serialize(Ar, TEXT("SnareServer"));
-
 	SlowFallLocal.Serialize(Ar, TEXT("SlowFallLocal"));
 
 	return !Ar.IsError();
@@ -321,7 +343,7 @@ void UModifierMovement::UpdateCharacterStateAfterMovement(float DeltaSeconds)
 	Super::UpdateCharacterStateAfterMovement(DeltaSeconds);
 }
 
-FClientAuthData* UModifierMovement::GetClientAuthData()
+FClientAuthData* UModifierMovement::ProcessClientAuthData()
 {
 	ClientAuthStack.SortByPriority();
 	return ClientAuthStack.GetFirst();
@@ -388,7 +410,7 @@ void UModifierMovement::GrantClientAuthority(FGameplayTag ClientAuthSource, floa
 	}
 	else
 	{
-#if !UE_BUILD_SHIPPING
+#if WITH_EDITOR
 		FMessageLog("PIE").Error(FText::FromString(FString::Printf(TEXT("ClientAuthSource '%s' not found in ClientAuthParams"), *ClientAuthSource.ToString())));
 #else
 		UE_LOG(LogModifierMovement, Error, TEXT("ClientAuthSource '%s' not found"), *ClientAuthSource.ToString());
@@ -396,8 +418,10 @@ void UModifierMovement::GrantClientAuthority(FGameplayTag ClientAuthSource, floa
 	}
 }
 
-bool UModifierMovement::ServerShouldGrantClientPositionAuthority(FVector& ClientLoc)
+bool UModifierMovement::ServerShouldGrantClientPositionAuthority(FVector& ClientLoc, FClientAuthData*& AuthData)
 {
+	AuthData = nullptr;
+	
 	// Already ignoring client movement error checks and correction
 	if (bIgnoreClientMovementErrorChecksAndCorrection)
 	{
@@ -413,15 +437,15 @@ bool UModifierMovement::ServerShouldGrantClientPositionAuthority(FVector& Client
 #endif
 
 	// Get auth data
-	FClientAuthData* ClientAuthData = GetClientAuthData();
-	if (!ClientAuthData || !ClientAuthData->IsValid())
+	AuthData = ProcessClientAuthData();
+	if (!AuthData || !AuthData->IsValid())
 	{
 		// No auth data, can't do anything
 		return false;
 	}
 
 	// Get auth params
-	const FClientAuthParams Params = GetClientAuthParams(ClientAuthData);
+	const FClientAuthParams Params = GetClientAuthParams(AuthData);
 
 	// Disabled
 	if (!Params.bEnableClientAuth)
@@ -431,7 +455,7 @@ bool UModifierMovement::ServerShouldGrantClientPositionAuthority(FVector& Client
 
 	// Validate auth data
 #if !UE_BUILD_SHIPPING
-	if (UNLIKELY(ClientAuthData->TimeRemaining <= 0.f))
+	if (UNLIKELY(AuthData->TimeRemaining <= 0.f))
 	{
 		// ServerMoveHandleClientError() should have removed the auth data already
 		return ensure(false);
@@ -439,7 +463,7 @@ bool UModifierMovement::ServerShouldGrantClientPositionAuthority(FVector& Client
 #endif
 	
 	// Reset alpha, we're going to calculate it now
-	ClientAuthData->Alpha = 0.f;
+	AuthData->Alpha = 0.f;
 
 	// How far the client is from the server
 	const FVector ServerLoc = UpdatedComponent->GetComponentLocation();
@@ -449,7 +473,7 @@ bool UModifierMovement::ServerShouldGrantClientPositionAuthority(FVector& Client
 	if (LocDiff.IsNearlyZero())
 	{
 		// Grant full authority
-		ClientAuthData->Alpha = 1.f;
+		AuthData->Alpha = 1.f;
 		return true;
 	}
 
@@ -464,14 +488,14 @@ bool UModifierMovement::ServerShouldGrantClientPositionAuthority(FVector& Client
 	if (LocDiff.Size() >= Params.MaxClientAuthDistance)
 	{
 		// Accept only a portion of the client's location
-		ClientAuthData->Alpha = Params.MaxClientAuthDistance / LocDiff.Size();
-		ClientLoc = FMath::Lerp<FVector>(ServerLoc, ClientLoc, ClientAuthData->Alpha);
+		AuthData->Alpha = Params.MaxClientAuthDistance / LocDiff.Size();
+		ClientLoc = FMath::Lerp<FVector>(ServerLoc, ClientLoc, AuthData->Alpha);
 		LocDiff = ServerLoc - ClientLoc;
 	}
 	else
 	{
 		// Accept full client location
-		ClientAuthData->Alpha = 1.f;
+		AuthData->Alpha = 1.f;
 	}
 
 	return true;
@@ -535,10 +559,10 @@ void UModifierMovement::ServerMoveHandleClientError(float ClientTimeStamp, float
 	// This is the entry-point for determining how to handle client corrections; we can determine they are out of sync
 	// and make any changes that suit our needs
 	
-	// Client >> TickComponent ➜ ControlledCharacterMove ➜ CallServerMove ➜ ReplicateMoveToServer >> Server
-	// >> ServerMove ➜ ServerMoveHandleClientError
+	// Client >> TickComponent ➜ ControlledCharacterMove ➜ CallServerMovePacked ➜ ReplicateMoveToServer >> Server
+	// >> ServerMove_PerformMovement ➜ ServerMoveHandleClientError
 
-	// Initialize client authority when the client is about to receive a correction that applies Snare
+	// Process and grant client authority
 #if !UE_BUILD_SHIPPING
 	if (!ModifierMovementCVars::bClientAuthDisabled)
 #endif
@@ -546,19 +570,45 @@ void UModifierMovement::ServerMoveHandleClientError(float ClientTimeStamp, float
 		// Update client authority time remaining
 		ClientAuthStack.Update(DeltaTime);
 
-		// Apply these thresholds to control client authority
+		// Test for client authority
 		FVector ClientLoc = FRepMovement::RebaseOntoZeroOrigin(RelativeClientLocation, this);
-		if (ServerShouldGrantClientPositionAuthority(ClientLoc))
+		FClientAuthData* AuthData = nullptr;
+		if (ServerShouldGrantClientPositionAuthority(ClientLoc, AuthData))
 		{
 			// Apply client authoritative position directly -- Subsequent moves will resolve overlapping conditions
 			UpdatedComponent->SetWorldLocation(ClientLoc, false);
 		}
+
+		// Cached to be sent to the client later with FMoveResponseDataContainer
+		ClientAuthAlpha = AuthData ? AuthData->Alpha : 0.f;
 	}
 
 	// The move prepared here will finally be sent in the next ReplicateMoveToServer()
-	
+
 	Super::ServerMoveHandleClientError(ClientTimeStamp, DeltaTime, Accel, RelativeClientLocation, ClientMovementBase,
 		ClientBaseBoneName, ClientMovementMode);
+}
+
+void UModifierMovement::ClientAdjustPosition_Implementation(float TimeStamp, FVector NewLoc, FVector NewVel,
+	UPrimitiveComponent* NewBase, FName NewBaseBoneName, bool bHasBase, bool bBaseRelativePosition,
+	uint8 ServerMovementMode, TOptional<FRotator> OptionalRotation)
+{
+	if (!HasValidData() || !IsActive())
+	{
+		return;
+	}
+
+	const FVector ClientLoc = UpdatedComponent->GetComponentLocation();
+	
+	Super::ClientAdjustPosition_Implementation(TimeStamp, NewLoc, NewVel, NewBase, NewBaseBoneName, bHasBase,
+		bBaseRelativePosition, ServerMovementMode,OptionalRotation);
+
+	const FModifierMoveResponseDataContainer& MoveResponse = static_cast<const FModifierMoveResponseDataContainer&>(GetMoveResponseDataContainer());
+	ClientAuthAlpha = MoveResponse.ClientAuthAlpha;
+
+	// Preserve client location relative to the partial client authority we have
+	const FVector AuthLocation = FMath::Lerp<FVector>(UpdatedComponent->GetComponentLocation(), ClientLoc, ClientAuthAlpha);
+	UpdatedComponent->SetWorldLocation(AuthLocation, false);
 }
 
 void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_Client_Character& ClientData,
@@ -580,8 +630,8 @@ void UModifierMovement::OnClientCorrectionReceived(class FNetworkPredictionData_
 	BoostCorrection.OnClientCorrectionReceived(MoveResponse.BoostCorrection.Modifiers);
 	BoostServer.OnClientCorrectionReceived(MoveResponse.BoostServer.Modifiers);
 	SnareServer.OnClientCorrectionReceived(MoveResponse.SnareServer.Modifiers);
-	
-	Super::OnClientCorrectionReceived(ClientData, TimeStamp, NewLocation, NewVelocity, NewBase, NewBaseBoneName,
+
+	Super::OnClientCorrectionReceived(ClientData, TimeStamp, UpdatedComponent->GetComponentLocation(), NewVelocity, NewBase, NewBaseBoneName,
 		bHasBase, bBaseRelativePosition, ServerMovementMode, ServerGravityDirection);
 }
 
@@ -589,15 +639,23 @@ bool UModifierMovement::ClientUpdatePositionAfterServerUpdate()
 {
 	const TModifierStack RealBoostLocal = BoostLocal.Data.WantsModifiers;
 	const TModifierStack RealBoostCorrection = BoostCorrection.Data.WantsModifiers;
-
+	const TModifierStack RealBoostServer = BoostServer.Data.WantsModifiers;
+	const TModifierStack RealSnareServer = SnareServer.Data.WantsModifiers;
 	const TModifierStack RealSlowFallLocal = SlowFallLocal.Data.WantsModifiers;
+
+	const FVector ClientLoc = UpdatedComponent->GetComponentLocation();
 	
 	const bool bResult = Super::ClientUpdatePositionAfterServerUpdate();
 	
 	BoostLocal.Data.WantsModifiers = RealBoostLocal;
 	BoostCorrection.Data.WantsModifiers = RealBoostCorrection;
-
+	BoostServer.Data.WantsModifiers = RealBoostServer;
+	SnareServer.Data.WantsModifiers = RealSnareServer;
 	SlowFallLocal.Data.WantsModifiers = RealSlowFallLocal;
+
+	// Preserve client location relative to the partial client authority we have
+	const FVector AuthLocation = FMath::Lerp<FVector>(UpdatedComponent->GetComponentLocation(), ClientLoc, ClientAuthAlpha);
+	UpdatedComponent->SetWorldLocation(AuthLocation, false);
 
 	return bResult;
 }

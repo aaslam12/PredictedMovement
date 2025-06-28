@@ -177,19 +177,11 @@ struct PREDICTEDMOVEMENT_API FClientAuthParams
 {
 	GENERATED_BODY()
 
-	FClientAuthParams()
+	FClientAuthParams(int32 InPriority = 99)
 		: bEnableClientAuth(true)
 		, ClientAuthTime(1.2f)
-		, MaxClientAuthDistance(150.f)
-		, RejectClientAuthDistance(900.f)
-		, Priority(99)
-	{}
-	
-	FClientAuthParams(int32 InPriority)
-		: bEnableClientAuth(true)
-		, ClientAuthTime(1.2f)
-		, MaxClientAuthDistance(150.f)
-		, RejectClientAuthDistance(900.f)
+		, MaxClientAuthDistance(35.f)
+		, RejectClientAuthDistance(500.f)
 		, Priority(InPriority)
 	{}
 
